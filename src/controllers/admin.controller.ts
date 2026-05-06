@@ -99,6 +99,44 @@ export class AdminController {
     }
   }
 
+  async banCouple(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const { reason } = req.body || {};
+      const couple = await adminService.banCouple(id, reason);
+      res.status(200).json({ success: true, data: couple });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  }
+
+  async unbanCouple(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const couple = await adminService.unbanCouple(id);
+      res.status(200).json({ success: true, data: couple });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  }
+
+  async processJoinRequestAsAdmin(req: Request, res: Response) {
+    try {
+      const { communityId, requestId, decision } = req.params;
+      if (decision !== 'accept' && decision !== 'reject') {
+        return res.status(400).json({ success: false, message: 'Invalid decision' });
+      }
+      const result = await adminService.processJoinRequestAsAdmin(
+        communityId,
+        requestId,
+        decision as 'accept' | 'reject',
+      );
+      res.status(200).json({ success: true, data: result });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  }
+
   async addPrompt(req: Request, res: Response) {
     try {
       const { title, category } = req.body;

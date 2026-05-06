@@ -1,0 +1,173 @@
+import admin from 'firebase-admin';
+import { prisma } from '../lib/prisma';
+import { logger } from '../utils/logger';
+
+/**
+ * Push Notification Service
+ *
+ * Bridges in-app notifications (Socket.IO + DB) to OS-level push via Firebase
+ * Cloud Messaging (FCM). FCM handles APNs delivery for iOS automatically once
+ * the APNs key is uploaded in the Firebase console.
+ *
+ * ──────────────────────────────────────────────────────────────────────────
+ * Setup (one-time, by ops):
+ *   1. Create a Firebase project for SAWA.
+ *   2. Console → Project settings → Service accounts → Generate new private
+ *      key. Save the JSON.
+ *   3. Set the env var FIREBASE_SERVICE_ACCOUNT_JSON to the *full JSON string*
+ *      (single line, no newlines). On Railway you can paste it directly.
+ *   4. For iOS: upload your APNs Authentication Key (.p8) under Project
+ *      settings → Cloud Messaging → Apple app configuration. Bundle ID:
+ *      com.sawa.application. Team ID + Key ID from your Apple Developer
+ *      account.
+ *
+ * Without FIREBASE_SERVICE_ACCOUNT_JSON set, push delivery silently no-ops
+ * (in-app notifications continue to work as before).
+ * ──────────────────────────────────────────────────────────────────────────
+ */
+
+let initialised = false;
+let enabled = false;
+
+const init = (): void => {
+  if (initialised) return;
+  initialised = true;
+
+  const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  if (!raw) {
+    logger.warn(
+      '[Push] FIREBASE_SERVICE_ACCOUNT_JSON not set — push notifications disabled. ' +
+        'In-app notifications continue to work normally.',
+    );
+    return;
+  }
+
+  try {
+    const serviceAccount = JSON.parse(raw);
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+    });
+    enabled = true;
+    logger.info('[Push] Firebase Admin initialised — push delivery enabled.');
+  } catch (err: any) {
+    logger.error(`[Push] Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON: ${err.message}`);
+  }
+};
+
+init();
+
+export interface PushPayload {
+  title: string;
+  body: string;
+  /** Arbitrary key/value pairs delivered with the push. Will be coerced to strings. */
+  data?: Record<string, unknown>;
+  /** A canonical "topic" string (e.g. "match", "community") for OS grouping. */
+  collapseKey?: string;
+}
+
+/**
+ * Send a push notification to every registered device of a couple.
+ *
+ * Looks up both partners' push tokens. Any token that returns
+ * UNREGISTERED / INVALID_ARGUMENT from FCM is removed from the DB so we don't
+ * keep retrying a stale install.
+ */
+export const pushToCouple = async (
+  coupleId: string,
+  payload: PushPayload,
+): Promise<{ sent: number; failed: number }> => {
+  if (!enabled) return { sent: 0, failed: 0 };
+
+  const users = await prisma.user.findMany({
+    where: { coupleId, pushToken: { not: null } },
+    select: { id: true, pushToken: true, pushPlatform: true },
+  });
+
+  const tokens = users
+    .map((u) => u.pushToken)
+    .filter((t): t is string => !!t && t.length > 0);
+
+  if (tokens.length === 0) return { sent: 0, failed: 0 };
+
+  const stringData: Record<string, string> = {};
+  if (payload.data) {
+    for (const [k, v] of Object.entries(payload.data)) {
+      if (v === null || v === undefined) continue;
+      stringData[k] = typeof v === 'string' ? v : JSON.stringify(v);
+    }
+  }
+
+  try {
+    const response = await admin.messaging().sendEachForMulticast({
+      tokens,
+      notification: {
+        title: payload.title,
+        body: payload.body,
+      },
+      data: stringData,
+      android: {
+        priority: 'high',
+        collapseKey: payload.collapseKey,
+        notification: {
+          sound: 'default',
+          channelId: 'sawa_default',
+        },
+      },
+      apns: {
+        payload: {
+          aps: {
+            sound: 'default',
+            badge: 1,
+          },
+        },
+      },
+    });
+
+    // Prune dead tokens so this couple doesn't keep failing forever.
+    if (response.failureCount > 0) {
+      const deadTokens: string[] = [];
+      response.responses.forEach((r, idx) => {
+        if (!r.success) {
+          const code = r.error?.code;
+          if (
+            code === 'messaging/registration-token-not-registered' ||
+            code === 'messaging/invalid-registration-token' ||
+            code === 'messaging/invalid-argument'
+          ) {
+            deadTokens.push(tokens[idx]);
+          }
+        }
+      });
+      if (deadTokens.length > 0) {
+        await prisma.user.updateMany({
+          where: { pushToken: { in: deadTokens } },
+          data: { pushToken: null, pushPlatform: null },
+        });
+        logger.info(`[Push] Pruned ${deadTokens.length} stale FCM token(s).`);
+      }
+    }
+
+    return { sent: response.successCount, failed: response.failureCount };
+  } catch (err: any) {
+    logger.error(`[Push] Send failed for couple ${coupleId}: ${err.message}`);
+    return { sent: 0, failed: tokens.length };
+  }
+};
+
+/**
+ * Convenience: push to many couples in parallel. Returns aggregate counts.
+ */
+export const pushToCouples = async (
+  coupleIds: string[],
+  payload: PushPayload,
+): Promise<{ sent: number; failed: number }> => {
+  const results = await Promise.all(
+    coupleIds.map((id) => pushToCouple(id, payload)),
+  );
+  return results.reduce(
+    (acc, r) => ({ sent: acc.sent + r.sent, failed: acc.failed + r.failed }),
+    { sent: 0, failed: 0 },
+  );
+};
+
+export const isPushEnabled = (): boolean => enabled;

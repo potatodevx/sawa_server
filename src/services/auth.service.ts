@@ -14,6 +14,25 @@ const getBypassPhones = (): Set<string> => {
   return new Set(env.BYPASS_PHONES.split(',').map(p => p.trim()).filter(Boolean));
 };
 
+/**
+ * Throws if the couple is banned by an admin. Both partners share the ban.
+ * Called from every login path so a fresh OTP can't bypass an active ban.
+ */
+const assertNotBanned = async (coupleId: string | null | undefined): Promise<void> => {
+  if (!coupleId) return;
+  const couple = await prisma.couple.findUnique({
+    where: { coupleId },
+    select: { bannedAt: true },
+  });
+  if (couple?.bannedAt) {
+    throw new AppError(
+      'This account has been suspended. Please contact support.',
+      403,
+      'ACCOUNT_BANNED',
+    );
+  }
+};
+
 export class AuthService {
   /**
    * STEP 1 — Send OTP
@@ -32,6 +51,10 @@ export class AuthService {
     if (existingPartner && existingPartner.isPhoneVerified) {
       throw new AppError('Partner number is already registered to another account.', 400, 'PARTNER_EXISTS');
     }
+
+    // If either phone belongs to a partially-registered banned couple, block reuse.
+    await assertNotBanned(existingYours?.coupleId);
+    await assertNotBanned(existingPartner?.coupleId);
 
     const coupleId = crypto.randomUUID();
 
@@ -213,6 +236,8 @@ export class AuthService {
       throw new AppError('No account found with this number.', 404, 'USER_NOT_FOUND');
     }
 
+    await assertNotBanned(user.coupleId);
+
     // ── Bypass: issue tokens immediately, no OTP needed ──────────────────────
     if (getBypassPhones().has(phone)) {
       logger.info(`[AuthService] Bypass login for ${phone}`);
@@ -285,6 +310,8 @@ export class AuthService {
     if (!user) {
       throw new AppError('No account found with this number.', 404, 'USER_NOT_FOUND');
     }
+
+    await assertNotBanned(user.coupleId || coupleId);
 
     let couple = null;
     if (user.coupleId) {

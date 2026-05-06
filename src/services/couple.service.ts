@@ -1,6 +1,7 @@
 import { prisma } from '../lib/prisma';
 import { AppError } from '../utils/AppError';
 import { logger } from '../utils/logger';
+import { emitRealtimeNotification } from '../utils/realtime';
 
 export class CoupleService {
   /**
@@ -187,6 +188,11 @@ export class CoupleService {
     // However, I used Json for answers if I remember correctly.
     // Let's check schema.prisma
     
+    const wasIncomplete = await prisma.couple.findUnique({
+      where: { coupleId },
+      select: { isProfileComplete: true, locationCity: true, profileName: true },
+    });
+
     await prisma.couple.update({
       where: { coupleId },
       data: { 
@@ -200,6 +206,19 @@ export class CoupleService {
           isProfileComplete: true 
       }
     });
+
+    // ─── Notify nearby couples that a new couple just joined their city ───
+    // Only fires on the FIRST time onboarding completes (not on re-saves)
+    // and only if we know what city they're in.
+    if (wasIncomplete && !wasIncomplete.isProfileComplete && wasIncomplete.locationCity) {
+      this.notifyNearbyCouples(
+        coupleId,
+        wasIncomplete.locationCity,
+        wasIncomplete.profileName || 'A new couple',
+      ).catch((err) => {
+        logger.warn(`[CoupleService] notifyNearbyCouples failed: ${err.message}`);
+      });
+    }
 
     // ─── AI BIO GENERATION (BACKGROUND) ─────────────────────────────────────
     (async () => {
@@ -448,6 +467,63 @@ export class CoupleService {
         where: { id: { in: me.blocked } },
         select: { id: true, profileName: true, primaryPhoto: true, locationCity: true, coupleId: true }
     });
+  }
+
+  /**
+   * Fan out a "new couple in your area" notification to all profile-complete,
+   * non-banned couples in the same city. This delivers as both an in-app
+   * notification (Socket.IO + Notification row) and an OS push (FCM).
+   *
+   * "Nearby" is currently city-level since we don't store GPS coordinates;
+   * upgrade to lat/lng + radius when geolocation is added to the schema.
+   */
+  private async notifyNearbyCouples(
+    newCoupleId: string,
+    city: string,
+    newCoupleName: string,
+  ): Promise<void> {
+    const nearby = await prisma.couple.findMany({
+      where: {
+        coupleId: { not: newCoupleId },
+        locationCity: city,
+        isProfileComplete: true,
+        bannedAt: null,
+      },
+      select: { coupleId: true },
+      take: 200,
+    });
+
+    if (nearby.length === 0) return;
+
+    const title = 'A new couple joined nearby';
+    const message = `${newCoupleName} just joined SAWA in ${city}. Say hi!`;
+
+    // Persist + emit each notification.
+    await Promise.all(
+      nearby.map(async (c) => {
+        const notif = await prisma.notification.create({
+          data: {
+            recipientId: c.coupleId,
+            senderId: newCoupleId,
+            type: 'nearby',
+            title,
+            message,
+            data: { coupleId: newCoupleId, city },
+          },
+        });
+        emitRealtimeNotification(c.coupleId, {
+          notificationId: notif.id,
+          type: 'nearby',
+          title,
+          message,
+          data: { coupleId: newCoupleId, city },
+        });
+      }),
+    );
+
+    logger.info(
+      `[CoupleService] Notified ${nearby.length} nearby couple(s) in ${city} about ${newCoupleId}`,
+    );
   }
 
   async deleteMyCouple(coupleId: string) {

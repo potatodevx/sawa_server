@@ -3,6 +3,7 @@ import { SOCKET_EVENTS } from '../constants/socketEvents';
 import { logger } from '../utils/logger';
 import { prisma } from '../lib/prisma';
 import { getCoupleCommunityColor } from '../utils/communityColors';
+import { emitRealtimeNotification } from '../utils/realtime';
 
 export const registerChatHandlers = (io: SocketIOServer, socket: Socket): void => {
   socket.on(SOCKET_EVENTS.CHAT_JOIN, (data: { chatId: string }) => {
@@ -135,7 +136,7 @@ export const registerChatHandlers = (io: SocketIOServer, socket: Socket): void =
                  });
 
                  if (!existingUnread) {
-                   await prisma.notification.create({
+                   const notif = await prisma.notification.create({
                      data: {
                        recipientId: recipientId,
                        senderId: socket.coupleId,
@@ -144,6 +145,13 @@ export const registerChatHandlers = (io: SocketIOServer, socket: Socket): void =
                        message: `You have new messages from ${me?.profileName || 'Couple'}`,
                        data: { matchId: chatId, coupleName: me?.profileName }
                      }
+                   });
+                   emitRealtimeNotification(recipientId, {
+                     notificationId: notif.id,
+                     type: 'message',
+                     title: notif.title,
+                     message: notif.message,
+                     data: notif.data,
                    });
                  }
               }
@@ -165,7 +173,7 @@ export const registerChatHandlers = (io: SocketIOServer, socket: Socket): void =
                     });
 
                     if (!existing) {
-                       await prisma.notification.create({
+                       const notif = await prisma.notification.create({
                           data: {
                              recipientId: member.coupleId,
                              senderId: socket.coupleId,
@@ -174,6 +182,13 @@ export const registerChatHandlers = (io: SocketIOServer, socket: Socket): void =
                              message: `New message in the group`,
                              data: { communityId: community.id, communityName: community.name, chatOnly: true }
                           }
+                       });
+                       emitRealtimeNotification(member.coupleId, {
+                         notificationId: notif.id,
+                         type: 'message',
+                         title: notif.title,
+                         message: notif.message,
+                         data: notif.data,
                        });
                     }
                  }

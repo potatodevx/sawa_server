@@ -1,21 +1,55 @@
 import { prisma } from '../lib/prisma';
+import { invalidateBanCache } from '../middleware/authenticate';
+import { emitRealtimeNotification } from '../utils/realtime';
+import { logger } from '../utils/logger';
+
+/**
+ * Inactivity threshold (days). A user with no `lastActiveAt` ping in this
+ * window is considered inactive in the admin tables. Configurable via env;
+ * defaults to 7 days per stakeholder requirement.
+ */
+const INACTIVITY_DAYS = Number(process.env.INACTIVITY_DAYS || 7);
+
+const isInactive = (lastActiveAt: Date | null | undefined): boolean => {
+  if (!lastActiveAt) return true;
+  const cutoff = Date.now() - INACTIVITY_DAYS * 24 * 60 * 60 * 1000;
+  return new Date(lastActiveAt).getTime() < cutoff;
+};
 
 export class AdminService {
   async getStats() {
     const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-    const [totalUsers, totalCouples, totalCommunities, totalMatches, totalPrompts, pendingReports, activeToday] =
-      await Promise.all([
-        prisma.user.count(),
-        prisma.couple.count(),
-        prisma.community.count(),
-        prisma.match.count({ where: { status: 'accepted' } }),
-        prisma.prompt.count({ where: { isActive: true } }),
-        prisma.report.count({ where: { status: 'pending' } }),
-        prisma.user.count({ where: { updatedAt: { gte: dayAgo } } }),
-      ]);
+    const [
+      totalUsers,
+      totalCouples,
+      totalCommunities,
+      _totalMatches,
+      totalPrompts,
+      pendingReports,
+      activeToday,
+      bannedCouples,
+    ] = await Promise.all([
+      prisma.user.count(),
+      prisma.couple.count(),
+      prisma.community.count(),
+      prisma.match.count({ where: { status: 'accepted' } }),
+      prisma.prompt.count({ where: { isActive: true } }),
+      prisma.report.count({ where: { status: 'pending' } }),
+      // Real activity now: pinged within last 24h via lastActiveAt.
+      prisma.user.count({ where: { lastActiveAt: { gte: dayAgo } } }),
+      prisma.couple.count({ where: { bannedAt: { not: null } } }),
+    ]);
 
-    return { totalUsers, totalCouples, totalCommunities, totalPrompts, activeToday, pendingReports };
+    return {
+      totalUsers,
+      totalCouples,
+      totalCommunities,
+      totalPrompts,
+      activeToday,
+      pendingReports,
+      bannedCouples,
+    };
   }
 
   async getUsers() {
@@ -47,24 +81,39 @@ export class AdminService {
       },
     });
 
-    return users.map((u, idx) => ({
-      _id: u.id,
-      id: u.id,
-      name: u.name || 'Unknown',
-      phone: u.phone,
-      city: (u.coupleProfile?.locationCity && u.coupleProfile?.locationCity !== 'Unknown') ? u.coupleProfile.locationCity : dummyCities[idx % dummyCities.length],
-      status: u.isPhoneVerified ? 'active' : 'inactive',
-      joinedAt: u.createdAt,
-      coupleId: u.coupleId,
-      profile: u.coupleProfile ? {
-        bio: u.coupleProfile.bio,
-        primaryPhoto: u.coupleProfile.primaryPhoto,
-        answers: u.coupleProfile.answers.map(a => ({
-          question: questionMap[a.questionId] || a.questionId,
-          options: a.selectedOptionIds.map(oid => optionLabelMap[oid] || oid)
-        }))
-      } : null
-    }));
+    return users.map((u, idx) => {
+      // Status hierarchy: banned > unverified > inactive (no recent activity) > active.
+      let status: 'banned' | 'inactive' | 'active' = 'active';
+      if (u.coupleProfile?.bannedAt) status = 'banned';
+      else if (!u.isPhoneVerified) status = 'inactive';
+      else if (isInactive(u.lastActiveAt)) status = 'inactive';
+
+      return {
+        _id: u.id,
+        id: u.id,
+        name: u.name || 'Unknown',
+        phone: u.phone,
+        city: (u.coupleProfile?.locationCity && u.coupleProfile?.locationCity !== 'Unknown')
+          ? u.coupleProfile.locationCity
+          : dummyCities[idx % dummyCities.length],
+        status,
+        joinedAt: u.createdAt,
+        lastActiveAt: u.lastActiveAt,
+        coupleId: u.coupleId,
+        bannedAt: u.coupleProfile?.bannedAt ?? null,
+        banReason: u.coupleProfile?.banReason ?? null,
+        relationshipStatus: u.coupleProfile?.relationshipStatus ?? null,
+        profile: u.coupleProfile ? {
+          bio: u.coupleProfile.bio,
+          primaryPhoto: u.coupleProfile.primaryPhoto,
+          relationshipStatus: u.coupleProfile.relationshipStatus,
+          answers: u.coupleProfile.answers.map(a => ({
+            question: questionMap[a.questionId] || a.questionId,
+            options: a.selectedOptionIds.map(oid => optionLabelMap[oid] || oid)
+          }))
+        } : null
+      };
+    });
   }
 
   async getCouples() {
@@ -96,25 +145,52 @@ export class AdminService {
       take: 100,
     });
 
-    return couples.map((c, idx) => ({
-      _id: c.coupleId,
-      id: c.coupleId,
-      pairName: c.profileName || 'Anonymous Pair',
-      city: (c.locationCity && c.locationCity !== 'Unknown') ? c.locationCity : dummyCities[idx % dummyCities.length],
-      compatibilityScore: Math.floor(Math.random() * 30) + 70,
-      streakDays: 0,
-      status: c.isProfileComplete ? 'engaged' : 'new',
-      bio: c.bio,
-      primaryPhoto: c.primaryPhoto,
-      partners: [
-        c.partner1 ? { id: c.partner1.id, name: c.partner1.name, phone: c.partner1.phone } : null,
-        c.partner2 ? { id: c.partner2.id, name: c.partner2.name, phone: c.partner2.phone } : null,
-      ].filter(Boolean),
-      answers: c.answers.map(a => ({
-        question: questionMap[a.questionId] || a.questionId,
-        options: a.selectedOptionIds.map(oid => optionLabelMap[oid] || oid)
-      }))
-    }));
+    return couples.map((c, idx) => {
+      // Couple is "inactive" only if BOTH partners are inactive.
+      const bothInactive =
+        isInactive(c.partner1?.lastActiveAt ?? null) &&
+        isInactive(c.partner2?.lastActiveAt ?? null);
+
+      let status: 'banned' | 'inactive' | 'engaged' | 'new' = 'new';
+      if (c.bannedAt) status = 'banned';
+      else if (c.isProfileComplete && bothInactive) status = 'inactive';
+      else if (c.isProfileComplete) status = 'engaged';
+
+      return {
+        _id: c.coupleId,
+        id: c.coupleId,
+        pairName: c.profileName || 'Anonymous Pair',
+        city: (c.locationCity && c.locationCity !== 'Unknown')
+          ? c.locationCity
+          : dummyCities[idx % dummyCities.length],
+        compatibilityScore: Math.floor(Math.random() * 30) + 70,
+        streakDays: 0,
+        status,
+        relationshipStatus: c.relationshipStatus,
+        bannedAt: c.bannedAt,
+        banReason: c.banReason,
+        bio: c.bio,
+        primaryPhoto: c.primaryPhoto,
+        partners: [
+          c.partner1 ? {
+            id: c.partner1.id,
+            name: c.partner1.name,
+            phone: c.partner1.phone,
+            lastActiveAt: c.partner1.lastActiveAt,
+          } : null,
+          c.partner2 ? {
+            id: c.partner2.id,
+            name: c.partner2.name,
+            phone: c.partner2.phone,
+            lastActiveAt: c.partner2.lastActiveAt,
+          } : null,
+        ].filter(Boolean),
+        answers: c.answers.map(a => ({
+          question: questionMap[a.questionId] || a.questionId,
+          options: a.selectedOptionIds.map(oid => optionLabelMap[oid] || oid)
+        }))
+      };
+    });
   }
 
   async getCityDistribution() {
@@ -174,9 +250,10 @@ export class AdminService {
   async getCommunities() {
     const comms = await prisma.community.findMany({
       orderBy: { createdAt: 'desc' },
-      include: { 
+      include: {
         members: { include: { couple: true } },
-        admins: { include: { couple: true } }
+        admins: { include: { couple: true } },
+        joinRequests: { include: { couple: true } },
       },
     });
 
@@ -200,6 +277,13 @@ export class AdminService {
         name: a.couple.profileName || 'Anonymous',
         photo: a.couple.primaryPhoto
       })),
+      pendingRequests: c.joinRequests.map(r => ({
+        id: r.id,
+        coupleId: r.coupleId,
+        name: r.couple.profileName || 'Anonymous',
+        photo: r.couple.primaryPhoto,
+      })),
+      hasNoHost: c.admins.length === 0,
       growthRate: 0,
     }));
   }
@@ -354,7 +438,29 @@ export class AdminService {
     }));
   }
 
-  async createCommunity(data: { name: string; description?: string; city: string; tags?: string[]; coverImageUrl?: string }) {
+  /**
+   * Admin community creation. Accepts an optional `hostCoupleId` — if provided,
+   * that couple is wired up as both admin and member so they can approve join
+   * requests from the mobile app. If omitted, the community has no host and the
+   * admin can use `processJoinRequestAsAdmin` to approve requests directly.
+   */
+  async createCommunity(data: {
+    name: string;
+    description?: string;
+    city: string;
+    tags?: string[];
+    coverImageUrl?: string;
+    hostCoupleId?: string | null;
+  }) {
+    let hostExists = false;
+    if (data.hostCoupleId) {
+      const host = await prisma.couple.findUnique({
+        where: { coupleId: data.hostCoupleId },
+        select: { coupleId: true },
+      });
+      hostExists = !!host;
+    }
+
     return prisma.community.create({
       data: {
         name: data.name,
@@ -362,8 +468,106 @@ export class AdminService {
         city: data.city,
         tags: data.tags || [],
         coverImageUrl: data.coverImageUrl,
+        ...(hostExists && data.hostCoupleId
+          ? {
+              admins: { create: { coupleId: data.hostCoupleId } },
+              members: { create: { coupleId: data.hostCoupleId } },
+            }
+          : {}),
       }
     });
+  }
+
+  /**
+   * Process a community join request from the admin panel.
+   * Bypasses the per-couple-admin check used by mobile, so admin-created
+   * (host-less) communities can still have requests approved.
+   */
+  async processJoinRequestAsAdmin(
+    communityId: string,
+    requestId: string,
+    decision: 'accept' | 'reject',
+  ) {
+    const request = await prisma.communityJoinRequest.findUnique({
+      where: { id: requestId },
+    });
+    if (!request || request.communityId !== communityId) {
+      throw new Error('Join request not found');
+    }
+
+    await prisma.communityJoinRequest.delete({ where: { id: requestId } });
+
+    if (decision === 'accept') {
+      await prisma.communityMember.upsert({
+        where: { communityId_coupleId: { communityId, coupleId: request.coupleId } },
+        update: {},
+        create: { communityId, coupleId: request.coupleId },
+      });
+
+      const community = await prisma.community.findUnique({
+        where: { id: communityId },
+        select: { name: true },
+      });
+
+      const notification = await prisma.notification.create({
+        data: {
+          recipientId: request.coupleId,
+          type: 'community',
+          title: 'Request Accepted!',
+          message: `You joined ${community?.name || 'the community'}!`,
+          data: { communityId },
+        },
+      });
+
+      emitRealtimeNotification(request.coupleId, {
+        notificationId: notification.id,
+        type: notification.type,
+        title: notification.title,
+        message: notification.message,
+        data: notification.data,
+      });
+
+      return { message: 'Accepted' };
+    }
+
+    return { message: 'Rejected' };
+  }
+
+  /**
+   * Ban a couple. Both partners are immediately blocked from logging in or
+   * making authenticated requests via existing tokens.
+   */
+  async banCouple(coupleId: string, reason?: string) {
+    const couple = await prisma.couple.update({
+      where: { coupleId },
+      data: {
+        bannedAt: new Date(),
+        banReason: reason || null,
+      },
+    });
+    invalidateBanCache(coupleId);
+
+    // Also revoke any active refresh tokens so previously-issued sessions die.
+    await prisma.user.updateMany({
+      where: { coupleId },
+      data: { refreshTokenHash: null },
+    });
+
+    logger.warn(`[Admin] Banned couple ${coupleId} (reason: ${reason || 'n/a'})`);
+    return couple;
+  }
+
+  /**
+   * Unban a previously-banned couple. They can log in again immediately.
+   */
+  async unbanCouple(coupleId: string) {
+    const couple = await prisma.couple.update({
+      where: { coupleId },
+      data: { bannedAt: null, banReason: null },
+    });
+    invalidateBanCache(coupleId);
+    logger.info(`[Admin] Unbanned couple ${coupleId}`);
+    return couple;
   }
 
   async addPrompt(text: string, category: string) {
@@ -412,16 +616,13 @@ export class AdminService {
 
     const result = await prisma.notification.createMany({ data, skipDuplicates: true });
 
-    // Emit real-time socket event to each recipient's couple room
-    const io = (global as any).io;
-    if (io) {
-      for (const coupleId of validCoupleIds) {
-        io.to(`couple:${coupleId}`).emit('notification:new', {
-          type: 'admin',
-          title,
-          message,
-          });
-      }
+    // Real-time fan-out: in-app socket + OS push (FCM) per recipient.
+    for (const coupleId of validCoupleIds) {
+      emitRealtimeNotification(coupleId, {
+        type: 'admin',
+        title,
+        message,
+      });
     }
 
     return result;

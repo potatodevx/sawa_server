@@ -18,6 +18,12 @@ model User {
   refreshTokenHash String?
   role             UserRole  @default(primary)
   password         String?
+  // Activity tracking — touched on every authenticated request.
+  // Used by admin to surface "Inactive" status (no activity > N days).
+  lastActiveAt     DateTime?
+  // Push notification credentials. Captured by mobile app at login/permission grant.
+  pushToken        String?
+  pushPlatform     String?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
   partnerOf1       Couple[]  @relation("Partner1")
@@ -26,6 +32,7 @@ model User {
   coupleProfile    Couple?   @relation("CouplePartners", fields: [coupleId], references: [coupleId])
 
   @@index([coupleId])
+  @@index([lastActiveAt])
   @@map("users")
 }
 
@@ -47,6 +54,10 @@ model Couple {
   avoidances            String[]               @default([])
   matchCriteria         String[]               @default([])
   blocked               String[]               @default([])
+  // Admin-controlled ban. When set, both partners are blocked from logging in
+  // and re-establishing sessions (existing tokens are rejected by middleware).
+  bannedAt              DateTime?
+  banReason             String?
   createdAt             DateTime               @default(now())
   updatedAt             DateTime               @updatedAt
   partner1Id            String?
@@ -274,6 +285,7 @@ enum NotificationType {
   community
   system
   admin
+  nearby
 }
 
 enum ReportStatus {
