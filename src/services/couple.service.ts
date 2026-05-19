@@ -276,6 +276,10 @@ export class CoupleService {
       primaryPhotoBase64?: string;
       secondaryPhotosBase64?: string[];
       keepSecondaryPhotoUrls?: string[];
+      // Location updates (sent by phone-login / OTP city detection and Settings)
+      location?: { city?: string; country?: string };
+      locationCity?: string;
+      locationCountry?: string;
     },
     requestingUserId?: string
   ) {
@@ -285,6 +289,17 @@ export class CoupleService {
     const updateData: any = {};
     if (data.bio !== undefined) updateData.bio = data.bio;
     if (data.relationshipStatus !== undefined) updateData.relationshipStatus = data.relationshipStatus;
+
+    // Location handling — accept both top-level (locationCity/locationCountry)
+    // and nested ({ location: { city, country } }) shapes from clients.
+    const incomingCity = data.location?.city ?? data.locationCity;
+    const incomingCountry = data.location?.country ?? data.locationCountry;
+    if (incomingCity !== undefined && incomingCity !== null && String(incomingCity).trim().length > 0) {
+      updateData.locationCity = String(incomingCity).trim();
+    }
+    if (incomingCountry !== undefined && incomingCountry !== null && String(incomingCountry).trim().length > 0) {
+      updateData.locationCountry = String(incomingCountry).trim();
+    }
     
     // 1. Photos processing
     if (data.primaryPhotoBase64 && data.primaryPhotoBase64.length > 10) {

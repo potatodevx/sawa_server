@@ -62,12 +62,21 @@ const UpdateMyCoupleSchema = z.object({
   bio: z.string().optional(),
   relationshipStatus: z.string().optional(),
   preferences: z.any().optional(),
+  matchCriteria: z.union([z.string(), z.array(z.string())]).optional(),
   yourName: z.string().optional(),
   yourDob: z.string().optional(),
   yourEmail: z.string().optional(),
   partnerName: z.string().optional(),
   partnerDob: z.string().optional(),
   partnerEmail: z.string().optional(),
+  location: z
+    .object({
+      city: z.string().optional(),
+      country: z.string().optional(),
+    })
+    .optional(),
+  locationCity: z.string().optional(),
+  locationCountry: z.string().optional(),
 });
 
 export const validateSetupProfile = validate(SetupProfileSchema);

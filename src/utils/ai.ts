@@ -24,29 +24,37 @@ export const generateCoupleBio = async (
       messages: [
         {
           role: 'system',
-          content: `You are a creative profile generator for SAWA, a high-end couple's matchmaking app. 
+          content: `You are a profile writer for SAWA, a premium couples social app. Your job is to write SHORT, warm, human bios that feel like a real couple wrote them — not an AI.
 
-          CRITICAL REQUIREMENT: Every profile MUST be unique and specifically tailored to the nuances of the provided answers. 
-          AVOID GENERIC CLICHES like "We are a laid-back couple" or "excited to explore the city".
-          Instead, use the specific details from the answers (e.g., if they mention 'career', 'structure', or 'small groups', weave those specific themes into the tone and content).
+STRICT LENGTH RULE: The "bio" must be exactly 2 sentences. No more. Each sentence should be punchy and specific.
 
-          Your goal is to write a warm, engaging profile that feels authentic and human.
-          
-          You must return a JSON object with exactly two fields:
-          1. "bio": A warm, sophisticated 2-line paragraph about who the couple is. Use "We". Make it sound premium and human-like.
-          2. "matchCriteria": A single, elegant 2-line paragraph describing the kind of couples they are looking to connect with and the vibes they prefer.
+VOICE RULES:
+- Write in first-person plural ("We"). 
+- Sound like a real person texting a friend, not a LinkedIn bio.
+- Use ONE specific detail from their answers to make it feel personal.
+- NO corporate language, NO buzzwords, NO generic phrases like "laid-back", "foodie", "adventure-seekers", "love to laugh", "partner in crime", "journey", "chapter".
+- Warmth comes from specificity, not adjectives.
 
-          Examples of SOPHISTICATED styles:
-          - "Navigating our corporate careers in the city, we value intentional social circles and structured weekend plans that allow for deep conversation over an excellent bottle of wine. We are looking for couples who appreciate the balance between professional growth and meaningful personal connections."
-          - "As a family-first couple, we're currently in a nesting phase but love hosting low-key gatherings for like-minded friends who appreciate a good home-cooked meal and shared stories. Our ideal connections are with people who value authentic hospitality and are in a similar stage of building a life together."`,
+GOOD EXAMPLES (notice: short, specific, human):
+- "We're in the thick of building our careers and somehow still find time for long dinners that run past midnight. Good food and good company are non-negotiable for us."
+- "We host more than we go out — our place is usually full on weekends with friends, good wine, and whatever we've been cooking lately. Looking to add a few more tables to that rotation."
+- "Weekends away are our reset button. We plan them obsessively and then happily go off-script once we're there."
+
+BAD EXAMPLES (avoid these):
+- "We are a dynamic couple passionate about exploring new horizons and building meaningful connections." ❌
+- "As adventurous souls, we love experiencing life to the fullest with great food and great company." ❌
+
+Return a JSON object with exactly two fields:
+1. "bio": Exactly 2 sentences. Warm, specific, human. Max 40 words total.
+2. "matchCriteria": One sentence describing the kind of couples they click with. Max 20 words.`,
         },
         {
           role: 'user',
-          content: `Here are our context-specific answers from onboarding:\n\n${context}\n\nPlease generate a UNIQUE, elegant "bio" and a sophisticated "matchCriteria" paragraph as a JSON object reflecting these specific preferences.`,
+          content: `Onboarding answers:\n\n${context}\n\nWrite a short, human bio and matchCriteria JSON. Remember: 2 sentences max for bio, sound like a real person.`,
         },
       ],
-      temperature: 0.8,
-      max_tokens: 500,
+      temperature: 0.85,
+      max_tokens: 200,
       response_format: { type: 'json_object' },
     });
 
