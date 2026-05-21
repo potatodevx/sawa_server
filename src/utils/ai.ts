@@ -7,8 +7,8 @@ const client = new OpenAI({
   baseURL: 'https://api.groq.com/openai/v1',
 });
 
-const BIO_LINE_COUNT = 12;
-const BIO_MAX_WORDS = 140;
+const BIO_MAX_LINES = 2;
+const BIO_MAX_WORDS = 45;
 
 /**
  * Generates one shared couple bio ("Who we are") and match criteria.
@@ -30,35 +30,34 @@ export const generateCoupleBio = async (
           content: `You write profiles for SAWA, a couples social app in India.
 
 OUTPUT: Return JSON only with:
-1. "bio" — ONE shared story for the couple (first-person plural: we, our, us). NOT two bios. NOT "Partner A / Partner B".
-2. "matchCriteria" — ONE short sentence (max 25 words) about what kind of couples they click with.
+1. "bio" — ONE shared bio for the couple (first-person plural: we, our, us). NOT two bios. NOT "Partner A / Partner B".
+2. "matchCriteria" — ONE short sentence (max 20 words) about what kind of couples they click with.
 
 BIO FORMAT (strict):
-- Exactly ${BIO_LINE_COUNT} lines, separated by newline characters \\n in the JSON string.
-- Each line is one short, complete thought (about 8–14 words per line).
+- 1 or 2 lines only (use \\n between lines if two lines).
+- Each line is one natural sentence — warm, specific, sounds human-written.
 - Total bio under ${BIO_MAX_WORDS} words.
-- Reads like a real couple wrote it in Notes — warm, specific, a little imperfect, never corporate.
+- Never corporate or AI-sounding.
 
 VOICE:
-- Use details from their answers (food, hosting, trips, pace of life, boundaries).
+- Pull one real detail from their answers (food, hosting, trips, pace, boundaries).
 - Gentle humour is fine. No emojis. No hashtags.
 - Never use: journey, passionate, dynamic, foodie, adventure-seekers, partner in crime, love to laugh, vibe, energy, explore, connect, meaningful, authentic (as filler).
 
-GOOD line examples:
-"We still argue about who's cooking but everyone leaves full."
-"Our flat is loud on Fridays — friends, wine, whatever's on the stove."
+GOOD:
+"We host more than we go out — weekends are for friends, good food, and staying up too late."
+"Our calendars are full but we still make room for long dinners and slow Sunday mornings."
 
-BAD (do not write like this):
-"We are passionate about building meaningful connections." 
-"We love exploring new horizons together."`,
+BAD:
+"We are passionate about building meaningful connections and exploring life together."`,
         },
         {
           role: 'user',
-          content: `Onboarding answers:\n\n${context}\n\nWrite JSON with "bio" (${BIO_LINE_COUNT} lines with \\n) and "matchCriteria". One couple, one bio.`,
+          content: `Onboarding answers:\n\n${context}\n\nWrite JSON with "bio" (1–2 lines max) and "matchCriteria". One couple, one bio.`,
         },
       ],
-      temperature: 0.88,
-      max_tokens: 520,
+      temperature: 0.85,
+      max_tokens: 180,
       response_format: { type: 'json_object' },
     });
 
@@ -71,16 +70,15 @@ BAD (do not write like this):
     const parsed = JSON.parse(content);
     let bio = typeof parsed.bio === 'string' ? parsed.bio.trim() : '';
 
-    // Normalize: ensure line breaks, collapse duplicate newlines, trim each line
     bio = bio
       .replace(/\r\n/g, '\n')
       .split('\n')
       .map((line: string) => line.trim())
       .filter(Boolean)
-      .slice(0, BIO_LINE_COUNT)
+      .slice(0, BIO_MAX_LINES)
       .join('\n');
 
-    logger.info(`[GroqAI] Bio generation successful (${bio.split('\n').length} lines).`);
+    logger.info(`[GroqAI] Bio generation successful (${bio.split('\n').length} line(s)).`);
 
     return {
       bio,
