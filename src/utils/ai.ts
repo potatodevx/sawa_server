@@ -7,12 +7,15 @@ const client = new OpenAI({
   baseURL: 'https://api.groq.com/openai/v1',
 });
 
+const BIO_MAX_LINES = 2;
+const BIO_MAX_WORDS = 45;
+
 /**
- * Generates a couple bio ("Who we are") and match criteria ("What we are looking for")
- * based on onboarding answers.
+ * Generates one shared couple bio ("Who we are") and match criteria.
+ * Bio is a single voice for the pair — not two separate partner bios.
  */
 export const generateCoupleBio = async (
-  qaData: Array<{ question: string; answers: string[] }>
+  qaData: Array<{ question: string; answers: string[] }>,
 ): Promise<{ bio: string; matchCriteria: string[] }> => {
   try {
     const context = qaData
@@ -24,45 +27,62 @@ export const generateCoupleBio = async (
       messages: [
         {
           role: 'system',
-          content: `You are a creative profile generator for SAWA, a high-end couple's matchmaking app. 
+          content: `You write profiles for SAWA, a couples social app in India.
 
-          CRITICAL REQUIREMENT: Every profile MUST be unique and specifically tailored to the nuances of the provided answers. 
-          AVOID GENERIC CLICHES like "We are a laid-back couple" or "excited to explore the city".
-          Instead, use the specific details from the answers (e.g., if they mention 'career', 'structure', or 'small groups', weave those specific themes into the tone and content).
+OUTPUT: Return JSON only with:
+1. "bio" — ONE shared bio for the couple (first-person plural: we, our, us). NOT two bios. NOT "Partner A / Partner B".
+2. "matchCriteria" — ONE short sentence (max 20 words) about what kind of couples they click with.
 
-          Your goal is to write a warm, engaging profile that feels authentic and human.
-          
-          You must return a JSON object with exactly two fields:
-          1. "bio": A warm, sophisticated 2-line paragraph about who the couple is. Use "We". Make it sound premium and human-like.
-          2. "matchCriteria": A single, elegant 2-line paragraph describing the kind of couples they are looking to connect with and the vibes they prefer.
+BIO FORMAT (strict):
+- 1 or 2 lines only (use \\n between lines if two lines).
+- Each line is one natural sentence — warm, specific, sounds human-written.
+- Total bio under ${BIO_MAX_WORDS} words.
+- Never corporate or AI-sounding.
 
-          Examples of SOPHISTICATED styles:
-          - "Navigating our corporate careers in the city, we value intentional social circles and structured weekend plans that allow for deep conversation over an excellent bottle of wine. We are looking for couples who appreciate the balance between professional growth and meaningful personal connections."
-          - "As a family-first couple, we're currently in a nesting phase but love hosting low-key gatherings for like-minded friends who appreciate a good home-cooked meal and shared stories. Our ideal connections are with people who value authentic hospitality and are in a similar stage of building a life together."`,
+VOICE:
+- Pull one real detail from their answers (food, hosting, trips, pace, boundaries).
+- Gentle humour is fine. No emojis. No hashtags.
+- Never use: journey, passionate, dynamic, foodie, adventure-seekers, partner in crime, love to laugh, vibe, energy, explore, connect, meaningful, authentic (as filler).
+
+GOOD:
+"We host more than we go out — weekends are for friends, good food, and staying up too late."
+"Our calendars are full but we still make room for long dinners and slow Sunday mornings."
+
+BAD:
+"We are passionate about building meaningful connections and exploring life together."`,
         },
         {
           role: 'user',
-          content: `Here are our context-specific answers from onboarding:\n\n${context}\n\nPlease generate a UNIQUE, elegant "bio" and a sophisticated "matchCriteria" paragraph as a JSON object reflecting these specific preferences.`,
+          content: `Onboarding answers:\n\n${context}\n\nWrite JSON with "bio" (1–2 lines max) and "matchCriteria". One couple, one bio.`,
         },
       ],
-      temperature: 0.8,
-      max_tokens: 500,
+      temperature: 0.85,
+      max_tokens: 180,
       response_format: { type: 'json_object' },
     });
 
     let content = response.choices[0]?.message?.content || '{}';
-    
-    // Cleanup markdown-wrapped JSON if present
+
     if (content.includes('```')) {
       content = content.replace(/```json|```/g, '').trim();
     }
 
     const parsed = JSON.parse(content);
-    logger.info(`[GroqAI] Bio generation successful for couple.`);
+    let bio = typeof parsed.bio === 'string' ? parsed.bio.trim() : '';
+
+    bio = bio
+      .replace(/\r\n/g, '\n')
+      .split('\n')
+      .map((line: string) => line.trim())
+      .filter(Boolean)
+      .slice(0, BIO_MAX_LINES)
+      .join('\n');
+
+    logger.info(`[GroqAI] Bio generation successful (${bio.split('\n').length} line(s)).`);
 
     return {
-      bio: parsed.bio || '',
-      matchCriteria: parsed.matchCriteria ? [parsed.matchCriteria] : [],
+      bio,
+      matchCriteria: parsed.matchCriteria ? [String(parsed.matchCriteria).trim()] : [],
     };
   } catch (err) {
     logger.error('[GroqAI] Failed to generate structured bio:', err);
