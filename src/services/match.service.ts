@@ -583,10 +583,14 @@ export class MatchService {
     const me = await prisma.couple.findUnique({ where: { coupleId: requestingCoupleId }, select: { id: true, coupleId: true } });
     if (!me) throw new AppError('Profile not found', 404);
 
+    // Only delete matches the user themselves initiated (actionById = me) or skipped.
+    // Never delete INCOMING pending requests — those belong to the other couple
+    // and must remain so the user can accept them from their notifications.
     await prisma.match.deleteMany({
       where: {
         OR: [{ couple1Id: me.coupleId }, { couple2Id: me.coupleId }],
-        status: { in: ['skipped', 'pending'] }
+        status: { in: ['skipped', 'pending'] },
+        actionById: me.coupleId,
       }
     });
 
