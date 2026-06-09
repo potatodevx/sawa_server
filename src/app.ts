@@ -215,10 +215,31 @@ export const createApp = (): Application => {
     <li>Request a copy of your data by contacting us.</li>
   </ul>
 
-  <h2>8. Changes to This Policy</h2>
+  <h2>8. Zero Tolerance for Objectionable Content</h2>
+  <p>SAWA maintains a strict <strong>zero-tolerance policy</strong> toward any objectionable content or abusive behaviour on the Platform. This includes sexually explicit material, hate speech, harassment, threats, bullying, violence, or any content a reasonable person would find offensive or harmful.</p>
+  <p>Any content or conduct that falls within these categories will result in immediate removal and may result in permanent account termination. Violations may also be reported to relevant authorities.</p>
+
+  <h2>9. How to Report Objectionable Content</h2>
+  <p>SAWA provides an in-app reporting mechanism so that any user can flag objectionable content or behaviour at any time:</p>
+  <ul>
+    <li>Navigate to the offending user's profile and tap the <strong>"Report"</strong> button.</li>
+    <li>Select a reason for the report — all reports are reviewed by SAWA's moderation team.</li>
+    <li>You may also report via email: <a href="mailto:support@gosawa.com">support@gosawa.com</a>.</li>
+  </ul>
+  <p>All reports are handled confidentially and appropriate action will be taken, including removal of content, warnings, or account termination.</p>
+
+  <h2>10. How to Block Abusive Users</h2>
+  <p>SAWA provides an in-app blocking feature that allows users to immediately stop all interactions with another user:</p>
+  <ul>
+    <li>Navigate to the user's profile and tap the <strong>"Block"</strong> button.</li>
+    <li>Once blocked, that user can no longer view your profile, message you, or interact with you on the Platform.</li>
+    <li>Blocking is immediate, private, and reversible through your account settings.</li>
+  </ul>
+
+  <h2>11. Changes to This Policy</h2>
   <p>We may update this Privacy Policy from time to time. We will notify you of significant changes through the app or via push notification.</p>
 
-  <h2>9. Contact Us</h2>
+  <h2>12. Contact Us</h2>
   <p>If you have any questions about this Privacy Policy, please contact us at:<br/>
   <a href="mailto:support@gosawa.com">support@gosawa.com</a></p>
 

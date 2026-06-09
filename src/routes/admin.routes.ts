@@ -22,6 +22,7 @@ router.post('/couples/:id/ban', controller.banCouple);
 router.post('/couples/:id/unban', controller.unbanCouple);
 router.delete('/communities/:id', controller.deleteCommunity);
 router.post('/communities', controller.addCommunity);
+router.patch('/communities/:id', controller.editCommunity);
 router.post(
   '/communities/:communityId/requests/:requestId/:decision',
   controller.processJoinRequestAsAdmin,

@@ -99,6 +99,28 @@ export class AdminController {
     }
   }
 
+  async editCommunity(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const { name, description, city, coverImageUrl, coverImageBase64, tags } = req.body;
+      const updateData: Record<string, any> = {};
+      if (name?.trim()) updateData.name = name.trim();
+      if (description !== undefined) updateData.description = description;
+      if (city?.trim()) updateData.city = city.trim();
+      if (tags !== undefined) updateData.tags = Array.isArray(tags) ? tags : tags.split(',').map((t: string) => t.trim()).filter(Boolean);
+      if (coverImageBase64 && coverImageBase64.length > 10) {
+        const prefix = coverImageBase64.startsWith('data:') ? '' : 'data:image/jpeg;base64,';
+        updateData.coverImageUrl = prefix + coverImageBase64;
+      } else if (coverImageUrl !== undefined) {
+        updateData.coverImageUrl = coverImageUrl;
+      }
+      const c = await prisma.community.update({ where: { id }, data: updateData });
+      res.status(200).json({ success: true, data: c });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  }
+
   async banCouple(req: Request, res: Response) {
     try {
       const { id } = req.params;
