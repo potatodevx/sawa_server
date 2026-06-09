@@ -272,6 +272,26 @@ export class AdminController {
     }
   }
 
+  async adminUnblock(req: Request, res: Response) {
+    try {
+      const { blockerCoupleId, targetId } = req.body;
+      if (!blockerCoupleId || !targetId) {
+        return res.status(400).json({ success: false, message: 'blockerCoupleId and targetId are required' });
+      }
+      // Find the blocker couple by coupleId (UUID)
+      const blocker = await prisma.couple.findFirst({ where: { coupleId: blockerCoupleId } });
+      if (!blocker) return res.status(404).json({ success: false, message: 'Blocker couple not found' });
+      const newBlocked = blocker.blocked.filter((id: string) => id !== targetId);
+      await prisma.couple.update({
+        where: { id: blocker.id },
+        data: { blocked: { set: newBlocked } },
+      });
+      res.status(200).json({ success: true, message: 'Unblocked successfully' });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  }
+
   async resolveReport(req: Request, res: Response) {
     try {
       const { id } = req.params;

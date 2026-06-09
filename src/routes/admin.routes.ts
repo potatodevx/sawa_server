@@ -28,6 +28,7 @@ router.post(
   controller.processJoinRequestAsAdmin,
 );
 router.get('/blocks', controller.getBlocks);
+router.delete('/blocks', controller.adminUnblock);
 router.patch('/reports/:id', controller.resolveReport);
 router.post('/notifications', controller.sendNotification);
 router.post('/flush-database', controller.flushDatabase);
