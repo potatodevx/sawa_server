@@ -506,10 +506,19 @@ export class CoupleService {
 
   async unblockCouple(meId: string, targetId: string) {
     const me = await prisma.couple.findUnique({ where: { id: meId } });
-    const blocked = (me?.blocked || []).filter((id: string) => id !== targetId);
+    if (!me) return null;
+
+    // Resolve all IDs for the target so we can remove whichever format is stored
+    const target = await (prisma.couple as any).findFirst({
+      where: { OR: [{ id: targetId }, { coupleId: targetId }] },
+      select: { id: true, coupleId: true },
+    });
+    const idsToRemove = new Set([targetId, target?.id, target?.coupleId].filter(Boolean));
+
+    const blocked = (me.blocked || []).filter((id: string) => !idsToRemove.has(id));
     return prisma.couple.update({
-        where: { id: meId },
-        data: { blocked: { set: blocked } }
+      where: { id: meId },
+      data: { blocked: { set: blocked } },
     });
   }
 
