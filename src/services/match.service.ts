@@ -194,9 +194,9 @@ export class MatchService {
         return { isMatch: false };
       }
 
-      // I already sent a pending hello; nothing to do
+      // I already sent a pending hello; nothing to do — return reason so UI can show feedback
       if (existingMatch.actionById === me.coupleId) {
-        return { isMatch: false };
+        return { isMatch: false, reason: 'outgoing_pending' };
       }
 
       if (existingMatch.status === 'pending' && existingMatch.actionById !== me.coupleId) {
@@ -513,16 +513,51 @@ export class MatchService {
       : await prisma.couple.findUnique({ where: { coupleId: requestingCoupleId }, select: { coupleId: true } });
     if (!me) throw new AppError('Profile not found', 404);
 
+    // Resolve the target couple once — used in fallback logic below.
+    const targetCouple = await prisma.couple.findFirst({
+      where: { OR: [{ id: targetCoupleIdStr }, { coupleId: targetCoupleIdStr }] },
+      select: { coupleId: true },
+    });
+
+    // Helper: find any live incoming pending from targetCouple → me
+    const findLiveIncomingPending = async () => {
+      if (!targetCouple) return null;
+      return prisma.match.findFirst({
+        where: {
+          status: 'pending',
+          actionById: { not: me.coupleId },
+          OR: [
+            { couple1Id: me.coupleId, couple2Id: targetCouple.coupleId },
+            { couple1Id: targetCouple.coupleId, couple2Id: me.coupleId },
+          ],
+        },
+      });
+    };
+
     // Prefer exact matchId from notification — avoids picking the wrong pending row.
     if (matchId) {
       const match = await prisma.match.findUnique({ where: { id: matchId } });
+
       if (!match) {
+        // matchId is stale (e.g. was deleted by an old refreshDiscovery bug on the sender's side).
+        // Before falling back to sayHello(), check if there's still a live incoming pending
+        // from that couple — if so, accept it directly so the user doesn't accidentally
+        // create a new outgoing hello instead.
+        const livePending = await findLiveIncomingPending();
+        if (livePending) {
+          return this.acceptPendingMatchRecord(livePending, me);
+        }
         return this.sayHello(requestingCoupleId, targetCoupleIdStr, coupleMongoId);
       }
 
       const iAmInvolved =
         match.couple1Id === me.coupleId || match.couple2Id === me.coupleId;
       if (!iAmInvolved) {
+        // matchId belongs to a different couple pair — same stale-id fallback
+        const livePending = await findLiveIncomingPending();
+        if (livePending) {
+          return this.acceptPendingMatchRecord(livePending, me);
+        }
         return this.sayHello(requestingCoupleId, targetCoupleIdStr, coupleMongoId);
       }
 
@@ -538,6 +573,7 @@ export class MatchService {
       }
     }
 
+    // No matchId provided — use sayHello which handles incoming pending gracefully
     return this.sayHello(requestingCoupleId, targetCoupleIdStr, coupleMongoId);
   }
 
@@ -583,14 +619,13 @@ export class MatchService {
     const me = await prisma.couple.findUnique({ where: { coupleId: requestingCoupleId }, select: { id: true, coupleId: true } });
     if (!me) throw new AppError('Profile not found', 404);
 
-    // Only delete matches the user themselves initiated (actionById = me) or skipped.
-    // Never delete INCOMING pending requests — those belong to the other couple
-    // and must remain so the user can accept them from their notifications.
+    // Only delete SKIPPED records so un-met couples re-appear in the feed.
+    // NEVER delete pending matches (outgoing OR incoming) — doing so would silently
+    // destroy connection requests that the other person may be about to accept.
     await prisma.match.deleteMany({
       where: {
         OR: [{ couple1Id: me.coupleId }, { couple2Id: me.coupleId }],
-        status: { in: ['skipped', 'pending'] },
-        actionById: me.coupleId,
+        status: 'skipped',
       }
     });
 
