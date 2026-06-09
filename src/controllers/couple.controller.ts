@@ -244,3 +244,16 @@ export const unblockCouple = async (req: Request, res: Response): Promise<void> 
    await coupleService.unblockCouple(coupleMongoId!, targetCoupleId);
    sendSuccess({ res, statusCode: 200, message: 'Couple unblocked' });
 };
+
+export const getBlockedCommunities = async (req: Request, res: Response): Promise<void> => {
+   const { coupleMongoId } = req.user!;
+   const communities = await coupleService.getBlockedCommunities(coupleMongoId!);
+   sendSuccess({ res, statusCode: 200, data: { communities } });
+};
+
+export const unblockCommunity = async (req: Request, res: Response): Promise<void> => {
+   const { coupleMongoId } = req.user!;
+   const { communityId } = req.body;
+   await coupleService.unblockCommunity(coupleMongoId!, communityId);
+   sendSuccess({ res, statusCode: 200, message: 'Community unblocked' });
+};

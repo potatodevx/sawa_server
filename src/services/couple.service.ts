@@ -492,9 +492,36 @@ export class CoupleService {
   async getBlockedCouples(meId: string) {
     const me = await prisma.couple.findUnique({ where: { id: meId } });
     if (!me?.blocked.length) return [];
+    // blocked[] may contain either Mongo id OR coupleId (UUID) depending on which
+    // block path was used — match both so all blocks are always shown
     return prisma.couple.findMany({
-        where: { id: { in: me.blocked } },
+        where: {
+          OR: [
+            { id: { in: me.blocked } },
+            { coupleId: { in: me.blocked } },
+          ],
+        },
         select: { id: true, profileName: true, primaryPhoto: true, locationCity: true, coupleId: true }
+    });
+  }
+
+  async getBlockedCommunities(meId: string) {
+    const me = await prisma.couple.findUnique({ where: { id: meId } });
+    if (!me?.blocked.length) return [];
+    // Resolve which blocked IDs belong to communities
+    const communities = await prisma.community.findMany({
+      where: { id: { in: me.blocked } },
+      select: { id: true, name: true, coverImageUrl: true },
+    });
+    return communities.map((c: any) => ({ id: c.id, name: c.name, image: c.coverImageUrl }));
+  }
+
+  async unblockCommunity(meId: string, communityId: string) {
+    const me = await prisma.couple.findUnique({ where: { id: meId } });
+    const blocked = (me?.blocked || []).filter((id: string) => id !== communityId);
+    return prisma.couple.update({
+      where: { id: meId },
+      data: { blocked: { set: blocked } },
     });
   }
 

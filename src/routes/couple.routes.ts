@@ -21,6 +21,8 @@ import {
   getBlockList,
   blockCouple,
   unblockCouple,
+  getBlockedCommunities,
+  unblockCommunity,
 } from '../controllers/couple.controller';
 
 const router = Router();
@@ -30,10 +32,14 @@ router.use(authenticate);
 // GET /api/v1/couples/me
 router.get('/me', asyncHandler(getMyCouple));
 
-// Block management
+// Block management — couples
 router.get('/blocks', asyncHandler(getBlockList));
 router.post('/blocks', asyncHandler(blockCouple));
 router.delete('/blocks', asyncHandler(unblockCouple));
+
+// Block management — communities
+router.get('/blocks/communities', asyncHandler(getBlockedCommunities));
+router.delete('/blocks/communities', asyncHandler(unblockCommunity));
 
 // GET /api/v1/couples/:id
 router.get('/:id', asyncHandler(getCoupleById));
