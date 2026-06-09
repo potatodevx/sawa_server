@@ -10,6 +10,7 @@ import {
   leaveCommunity,
   inviteToCommunity,
   deleteCommunity,
+  updateCommunity,
   getInviteableCouples,
   processJoinRequest,
   validateCreateCommunity,
@@ -40,6 +41,9 @@ router.post('/:id/invite', asyncHandler(inviteToCommunity));
 
 // POST /api/v1/communities/:id/leave
 router.post('/:id/leave', asyncHandler(leaveCommunity));
+
+// PATCH /api/v1/communities/:id  — admin only: edit name, bio, image
+router.patch('/:id', asyncHandler(updateCommunity));
 
 // DELETE /api/v1/communities/:id
 router.delete('/:id', asyncHandler(deleteCommunity));

@@ -461,6 +461,32 @@ export class CommunityService {
     };
   }
 
+  async updateCommunity(
+    requestingCoupleId: string,
+    communityId: string,
+    data: { name?: string; description?: string; coverImageUrl?: string },
+  ) {
+    const me = await prisma.couple.findUnique({ where: { coupleId: requestingCoupleId } });
+    if (!me) throw new AppError('Profile not found', 404);
+
+    const isAdmin = await prisma.communityAdmin.findUnique({
+      where: { communityId_coupleId: { communityId, coupleId: me.coupleId } },
+    });
+    if (!isAdmin) throw new AppError('Only community admins can edit this community', 403);
+
+    const updateData: Record<string, any> = {};
+    if (data.name?.trim()) updateData.name = data.name.trim();
+    if (data.description !== undefined) updateData.description = data.description;
+    if (data.coverImageUrl !== undefined) updateData.coverImageUrl = data.coverImageUrl;
+
+    const community = await prisma.community.update({
+      where: { id: communityId },
+      data: updateData,
+    });
+
+    return community;
+  }
+
   async deleteCommunity(requestingCoupleId: string, communityId: string) {
     const me = await prisma.couple.findUnique({ where: { coupleId: requestingCoupleId } });
     if (!me) throw new AppError('Profile not found', 404);
