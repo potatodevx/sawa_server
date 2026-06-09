@@ -260,4 +260,21 @@ export class AdminController {
       res.status(500).json({ success: false, message: err.message });
     }
   }
+
+  async resolveReport(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const { status } = req.body; // 'resolved' | 'dismissed'
+      if (!['resolved', 'dismissed'].includes(status)) {
+        return res.status(400).json({ success: false, message: 'status must be resolved or dismissed' });
+      }
+      const report = await prisma.report.update({
+        where: { id },
+        data: { status },
+      });
+      res.status(200).json({ success: true, data: report });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  }
 }
