@@ -469,13 +469,37 @@ export class CoupleService {
   }
 
   async blockCouple(meId: string, targetId: string) {
-    const me = await prisma.couple.findUnique({ where: { id: meId } });
-    const blocked = me?.blocked || [];
-    if (!blocked.includes(targetId)) {
-        return prisma.couple.update({
-            where: { id: meId },
-            data: { blocked: { set: [...blocked, targetId] } }
-        });
+    // meId and targetId may be Mongo id or coupleId UUID — resolve both
+    const me = await prisma.couple.findUnique({ where: { id: meId }, select: { id: true, coupleId: true, blocked: true } });
+    if (!me) return null;
+
+    // Find target by either Mongo id or coupleId
+    const target = await (prisma.couple as any).findFirst({
+      where: { OR: [{ id: targetId }, { coupleId: targetId }] },
+      select: { id: true, coupleId: true },
+    });
+    const resolvedTargetId = target?.coupleId || targetId;
+
+    const blocked = me.blocked || [];
+    if (!blocked.includes(resolvedTargetId)) {
+      await Promise.all([
+        prisma.couple.update({
+          where: { id: meId },
+          data: { blocked: { set: [...blocked, resolvedTargetId] } },
+        }),
+        // Always create a report so the admin can see blocks from all sources
+        me.coupleId
+          ? prisma.report.create({
+              data: {
+                reporterId: me.coupleId,
+                targetId: resolvedTargetId,
+                reason: 'Blocked user',
+                details: 'User blocked via stop-seeing action',
+                status: 'pending',
+              },
+            })
+          : Promise.resolve(),
+      ]);
     }
     return me;
   }
