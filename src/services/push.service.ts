@@ -155,6 +155,67 @@ export const pushToCouple = async (
 };
 
 /**
+ * Send a push notification to one specific user (not both partners).
+ * Used for private partner-to-partner notifications like US Space nudges so
+ * the sender does NOT receive their own notification.
+ */
+export const pushToUser = async (
+  userId: string,
+  payload: PushPayload,
+): Promise<{ sent: number; failed: number }> => {
+  if (!enabled) return { sent: 0, failed: 0 };
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId, pushToken: { not: null } },
+    select: { id: true, pushToken: true },
+  });
+
+  const token = user?.pushToken;
+  if (!token) return { sent: 0, failed: 0 };
+
+  const stringData: Record<string, string> = {};
+  if (payload.data) {
+    for (const [k, v] of Object.entries(payload.data)) {
+      if (v === null || v === undefined) continue;
+      stringData[k] = typeof v === 'string' ? v : JSON.stringify(v);
+    }
+  }
+
+  try {
+    const response = await admin.messaging().send({
+      token,
+      notification: { title: payload.title, body: payload.body },
+      data: stringData,
+      android: {
+        priority: 'high',
+        collapseKey: payload.collapseKey,
+        notification: { sound: 'default', channelId: 'sawa_default' },
+      },
+      apns: {
+        payload: { aps: { sound: 'default', badge: 1 } },
+      },
+    });
+    logger.info(`[Push] Sent to user ${userId}: ${response}`);
+    return { sent: 1, failed: 0 };
+  } catch (err: any) {
+    const code = err?.errorInfo?.code as string | undefined;
+    if (
+      code === 'messaging/registration-token-not-registered' ||
+      code === 'messaging/invalid-registration-token'
+    ) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { pushToken: null, pushPlatform: null },
+      });
+      logger.info(`[Push] Pruned stale token for user ${userId}.`);
+    } else {
+      logger.error(`[Push] Send to user ${userId} failed: ${err.message}`);
+    }
+    return { sent: 0, failed: 1 };
+  }
+};
+
+/**
  * Convenience: push to many couples in parallel. Returns aggregate counts.
  */
 export const pushToCouples = async (

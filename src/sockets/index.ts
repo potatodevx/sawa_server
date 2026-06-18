@@ -8,6 +8,7 @@ import { verifyAccessToken } from '../utils/jwt';
 import { prisma } from '../lib/prisma';
 import { registerChatHandlers } from './chat.socket';
 import { registerMatchHandlers } from './match.socket';
+import { registerUsHandlers } from './us.socket';
 
 declare module 'socket.io' {
   interface Socket {
@@ -89,6 +90,7 @@ export const createSocketServer = (httpServer: HTTPServer): SocketIOServer => {
     
     registerChatHandlers(io, socket);
     registerMatchHandlers(io, socket);
+    registerUsHandlers(io, socket);
 
     if (socket.coupleId) {
         socket.join(`couple:${socket.coupleId}`);
