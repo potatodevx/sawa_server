@@ -229,24 +229,75 @@ export class AdminService {
   async deleteCouple(coupleId: string) {
     const couple = await prisma.couple.findUnique({
       where: { coupleId },
-      include: { partner1: true, partner2: true }
+      include: { partner1: true, partner2: true },
     });
 
     if (!couple) throw new Error('Couple not found');
 
-    const userIds = [couple.partner1Id, couple.partner2Id].filter(id => !!id) as string[];
+    const userIds = [couple.partner1Id, couple.partner2Id].filter(Boolean) as string[];
 
-    return prisma.$transaction([
-      prisma.notification.deleteMany({ where: { OR: [{ recipientId: coupleId }, { senderId: coupleId }] } }),
-      prisma.match.deleteMany({ where: { OR: [{ couple1Id: coupleId }, { couple2Id: coupleId }, { actionById: coupleId }] } }),
-      prisma.message.deleteMany({ where: { OR: [{ matchId: { not: null } }, { communityId: { not: null } }], senderId: coupleId } }),
-      prisma.communityMember.deleteMany({ where: { coupleId } }),
-      prisma.communityAdmin.deleteMany({ where: { coupleId } }),
-      prisma.onboardingAnswer.deleteMany({ where: { coupleId } }),
-      prisma.report.deleteMany({ where: { OR: [{ reporterId: coupleId }, { targetId: coupleId }] } }),
-      prisma.couple.delete({ where: { coupleId } }),
-      prisma.user.deleteMany({ where: { id: { in: userIds } } }),
-    ]);
+    // Sequential transaction so we can respect FK constraints and break circular deps
+    await prisma.$transaction(async (tx) => {
+      // 1. Delete ALL messages sent by this couple (any chat type)
+      await tx.message.deleteMany({ where: { senderId: coupleId } });
+
+      // 2. Delete messages inside any match this couple was part of
+      //    (sent by the other couple in those conversations)
+      const coupleMatches = await tx.match.findMany({
+        where: { OR: [{ couple1Id: coupleId }, { couple2Id: coupleId }] },
+        select: { id: true },
+      });
+      const matchIds = coupleMatches.map((m) => m.id);
+      if (matchIds.length > 0) {
+        await tx.message.deleteMany({ where: { matchId: { in: matchIds } } });
+      }
+
+      // 3. Delete matches
+      await tx.match.deleteMany({
+        where: { OR: [{ couple1Id: coupleId }, { couple2Id: coupleId }, { actionById: coupleId }] },
+      });
+
+      // 4. Delete notifications
+      await tx.notification.deleteMany({
+        where: { OR: [{ recipientId: coupleId }, { senderId: coupleId }] },
+      });
+
+      // 5. Delete community relations
+      await tx.communityMember.deleteMany({ where: { coupleId } });
+      await tx.communityAdmin.deleteMany({ where: { coupleId } });
+      await tx.communityJoinRequest.deleteMany({ where: { coupleId } });
+
+      // 6. Delete onboarding answers
+      await tx.onboardingAnswer.deleteMany({ where: { coupleId } });
+
+      // 7. Delete reports filed by or against this couple
+      await tx.report.deleteMany({
+        where: { OR: [{ reporterId: coupleId }, { targetId: coupleId }] },
+      });
+
+      // 8. Delete OTP tokens tied to this couple
+      await tx.otpToken.deleteMany({ where: { coupleId } });
+
+      // 9. Break circular FK: clear partner refs on couple & coupleId on users
+      await tx.couple.update({
+        where: { coupleId },
+        data: { partner1Id: null, partner2Id: null },
+      });
+      if (userIds.length > 0) {
+        await tx.user.updateMany({
+          where: { id: { in: userIds } },
+          data: { coupleId: null },
+        });
+      }
+
+      // 10. Delete the couple record
+      await tx.couple.delete({ where: { coupleId } });
+
+      // 11. Delete user records
+      if (userIds.length > 0) {
+        await tx.user.deleteMany({ where: { id: { in: userIds } } });
+      }
+    });
   }
 
   async getCommunities() {

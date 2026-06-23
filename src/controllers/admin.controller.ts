@@ -184,9 +184,30 @@ export class AdminController {
   async deleteUser(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      await prisma.user.delete({ where: { id } });
-      res.status(200).json({ success: true, message: 'User deleted' });
+
+      // Find the user and their associated couple
+      const user = await prisma.user.findUnique({
+        where: { id },
+        select: { id: true, coupleId: true },
+      });
+      if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+      if (user.coupleId) {
+        // Deleting a user who belongs to a couple: wipe the entire couple and both partners
+        // so no orphaned couple or partner remains in the DB
+        await adminService.deleteCouple(user.coupleId);
+      } else {
+        // Solo user — delete their own messages then the user record
+        await prisma.$transaction(async (tx) => {
+          await tx.message.deleteMany({ where: { senderUserId: id } });
+          await tx.otpToken.deleteMany({ where: { phone: (await tx.user.findUnique({ where: { id }, select: { phone: true } }))?.phone ?? '' } });
+          await tx.user.delete({ where: { id } });
+        });
+      }
+
+      res.status(200).json({ success: true, message: 'User and all associated data deleted' });
     } catch (err: any) {
+      logger.error('❌ Admin deleteUser Error:', err.message);
       res.status(500).json({ success: false, message: err.message });
     }
   }
