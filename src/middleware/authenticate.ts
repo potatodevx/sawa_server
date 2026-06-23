@@ -61,21 +61,36 @@ export const authenticate = async (
       coupleMongoId: payload.coupleMongoId,
     };
 
-    // ─── Ban check (cached) ────────────────────────────────────────────────
+    // ─── Ban + existence check (cached) ───────────────────────────────────
     if (payload.coupleId) {
       const cached = banStatusCache.get(payload.coupleId);
       const now = Date.now();
       let bannedAt: Date | null;
+      let coupleFound: boolean;
 
       if (cached && now - cached.checkedAt < BAN_CACHE_MS) {
         bannedAt = cached.bannedAt;
+        // coupleFound is stored alongside bannedAt; old cache entries without
+        // this flag are treated as "found" to avoid spurious logouts on redeploy.
+        coupleFound = (cached as any).coupleFound !== false;
       } else {
         const couple = await prisma.couple.findUnique({
           where: { coupleId: payload.coupleId },
           select: { bannedAt: true },
         });
+        coupleFound = couple !== null;
         bannedAt = couple?.bannedAt ?? null;
-        banStatusCache.set(payload.coupleId, { bannedAt, checkedAt: now });
+        banStatusCache.set(payload.coupleId, {
+          bannedAt,
+          checkedAt: now,
+          ...(({ coupleFound }) => ({ coupleFound }))({ coupleFound }),
+        } as any);
+      }
+
+      // Couple was deleted — revoke the session so the mobile app logs out
+      if (!coupleFound) {
+        banStatusCache.delete(payload.coupleId);
+        return next(new AppError('Account no longer exists.', 401, 'ACCOUNT_DELETED'));
       }
 
       if (bannedAt) {
