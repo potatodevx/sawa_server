@@ -126,7 +126,7 @@ export const getPrivateMessages = async (req: Request, res: Response): Promise<v
       matchId: matchId,
     },
     include: {
-      sender: { select: { coupleId: true } },
+      sender: { select: { coupleId: true, profileName: true } },
       senderUser: { select: { role: true, name: true } },
     },
     orderBy: { createdAt: 'desc' },
@@ -134,8 +134,17 @@ export const getPrivateMessages = async (req: Request, res: Response): Promise<v
   });
 
   const finalMessages = messages.reverse().map((m: any) => {
+    // Derive a human-readable first name. Priority order:
+    // 1. Stored senderIndividualName on the message row (set at send time)
+    // 2. User.name from the individual user record
+    // 3. senderName stored on the message
+    // 4. First partner name from couple profileName (e.g. "Kiran & Stella" → "Kiran")
+    // 5. Last resort: fallback string
+    const coupleFirstName = m.sender?.profileName
+      ? m.sender.profileName.split(/\s*&\s*/)[m.senderUser?.role === 'partner' ? 1 : 0]?.trim()
+      : undefined;
     const individualName =
-      m.senderIndividualName || m.senderUser?.name || m.senderName || 'User';
+      m.senderIndividualName || m.senderUser?.name || m.senderName || coupleFirstName || 'Me';
     return {
       _id: m.id,
       content: m.content,
@@ -168,13 +177,22 @@ export const sendPrivateMessage = async (req: Request, res: Response): Promise<v
 
   const senderUser = await prisma.user.findUnique({
     where: { id: userId },
-    select: { name: true },
+    select: { name: true, role: true },
   });
+  // Fallback: derive first name from couple profileName when user.name is not set yet
+  const coupleProfile = senderUser?.name ? null : await prisma.couple.findUnique({
+    where: { coupleId },
+    select: { profileName: true },
+  });
+  const coupleFirstName = coupleProfile?.profileName
+    ? coupleProfile.profileName.split(/\s*&\s*/)[senderUser?.role === 'partner' ? 1 : 0]?.trim()
+    : undefined;
   const senderName =
     req.body.senderIndividualName ||
     senderUser?.name ||
     req.body.senderName ||
-    'User';
+    coupleFirstName ||
+    'Me';
 
   const message = await prisma.message.create({
     data: {
