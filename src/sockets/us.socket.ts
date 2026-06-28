@@ -2,6 +2,7 @@ import { Server as SocketIOServer, Socket } from 'socket.io';
 import { prisma } from '../lib/prisma';
 import { logger } from '../utils/logger';
 import { pushToUser } from '../services/push.service';
+import { invalidateNotifUnreadCount } from '../lib/cache';
 
 /**
  * US Space Socket Handlers
@@ -20,6 +21,43 @@ import { pushToUser } from '../services/push.service';
  *     as before.
  * ─────────────────────────────────────────────────────────────────────────
  */
+
+/**
+ * Persist a couple-internal notification (love / hug / date plan) so it
+ * shows up in the partner's in-app Notifications screen.
+ *
+ * Both partners share the same coupleId so `recipientId = coupleId`.
+ * We store `senderUserId` inside `data` so the client can suppress the
+ * notification for the person who sent it (sender sees nothing, only
+ * the partner sees it).
+ */
+async function saveUsNotification(params: {
+  coupleId: string;
+  senderUserId: string;
+  subtype: 'us_love' | 'us_hug' | 'us_date_plan';
+  title: string;
+  message: string;
+  extraData?: Record<string, unknown>;
+}): Promise<void> {
+  try {
+    const { coupleId, senderUserId, subtype, title, message, extraData } = params;
+    await prisma.notification.create({
+      data: {
+        recipientId: coupleId,
+        senderId: coupleId,
+        type: 'system',
+        title,
+        message,
+        data: { subtype, senderUserId, navigate: 'UsSpace', ...extraData },
+        read: false,
+      },
+    });
+    // Bust cached unread count so the bell badge updates immediately.
+    await invalidateNotifUnreadCount(coupleId);
+  } catch (err: any) {
+    logger.warn(`[UsSocket] saveUsNotification failed: ${err.message}`);
+  }
+}
 
 /** Look up the partner's User.id given the sender's userId + coupleId. */
 async function findPartnerId(
@@ -47,24 +85,51 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
   // ── us:nudge ──────────────────────────────────────────────────────────
   socket.on(
     'us:nudge',
-    async (payload: { kind: string; message: string; at: string }) => {
+    async (payload: { kind: string; message: string; at: string; date?: string; activity?: string }) => {
       if (!userId || !coupleId) return;
 
-      logger.info(`[UsSocket] nudge from ${userId} (${userName}) in couple ${coupleId}`);
+      logger.info(`[UsSocket] nudge(${payload.kind}) from ${userId} (${userName}) in couple ${coupleId}`);
+
+      const senderName = userName || 'Your partner';
 
       // 1. Real-time relay — partner's socket only (exclude sender).
       io.to(`couple:${coupleId}`).except(socket.id).emit('us:nudge', {
         kind: payload.kind,
         message: payload.message,
         at: payload.at,
-        from: userName || 'Your partner',
+        from: senderName,
+        date: payload.date,
+        activity: payload.activity,
       });
 
-      // 2. Push notification — only to the partner device, not the sender.
+      // 2. Save in-app notification.
+      const isHug = payload.kind === 'hug';
+      const isDatePlan = payload.kind === 'date_plan';
+
+      if (isHug) {
+        await saveUsNotification({
+          coupleId,
+          senderUserId: userId,
+          subtype: 'us_hug',
+          title: `${senderName} sent you a hug 🤗`,
+          message: payload.message || 'Sending you a big warm hug!',
+        });
+      } else if (isDatePlan) {
+        await saveUsNotification({
+          coupleId,
+          senderUserId: userId,
+          subtype: 'us_date_plan',
+          title: `${senderName} planned a date 📅`,
+          message: payload.message || 'A date has been planned for you two!',
+          extraData: { date: payload.date, activity: payload.activity },
+        });
+      }
+
+      // 3. Push notification — only to the partner device.
       const partnerId = await findPartnerId(userId, coupleId);
       if (partnerId) {
         pushToUser(partnerId, {
-          title: `${userName || 'Your partner'} sent you a nudge 💛`,
+          title: `${senderName} sent you a nudge 💛`,
           body: payload.message,
           data: {
             type: 'us_nudge',
@@ -83,15 +148,26 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
 
     logger.info(`[UsSocket] love from ${userId} (${userName}) in couple ${coupleId}`);
 
+    const senderName = payload.from || userName || 'Your partner';
+
     io.to(`couple:${coupleId}`).except(socket.id).emit('us:love', {
-      from: payload.from || userName || 'Your partner',
+      from: senderName,
       at: payload.at,
+    });
+
+    // Save in-app notification (partner sees it; sender is filtered client-side).
+    await saveUsNotification({
+      coupleId,
+      senderUserId: userId,
+      subtype: 'us_love',
+      title: `${senderName} sent you love ❤️`,
+      message: 'Open the Us space to feel the love',
     });
 
     const partnerId = await findPartnerId(userId, coupleId);
     if (partnerId) {
       pushToUser(partnerId, {
-        title: `${payload.from || userName || 'Your partner'} sent you love ❤️`,
+        title: `${senderName} sent you love ❤️`,
         body: 'Open the US space to see it',
         data: { type: 'us_love', navigate: 'UsSpace' },
         collapseKey: 'us_love',
