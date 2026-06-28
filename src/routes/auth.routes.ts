@@ -13,6 +13,7 @@ import {
   validateLoginVerifyOtp,
   validateRefresh,
   invitePartner,
+  resendOtp,
 } from '../controllers/auth.controller';
 import { asyncHandler } from '../utils/asyncHandler';
 import { authenticate } from '../middleware/authenticate';
@@ -36,6 +37,9 @@ router.post('/refresh', validateRefresh, asyncHandler(refreshToken));
 
 // POST /api/v1/auth/logout  (protected)
 router.post('/logout', authenticate, asyncHandler(logout));
+
+// POST /api/v1/auth/resend-otp  — resend for ONE phone only, reuses existing coupleId
+router.post('/resend-otp', authRateLimiter, asyncHandler(resendOtp));
 
 // POST /api/v1/auth/invite-partner
 router.post('/invite-partner', asyncHandler(invitePartner));

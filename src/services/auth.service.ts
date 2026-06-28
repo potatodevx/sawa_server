@@ -356,6 +356,40 @@ export class AuthService {
     };
   }
 
+  /**
+   * RESEND OTP — only for one phone at a time.
+   * Reuses the existing coupleId so the other partner's OTP is NOT affected.
+   * Safe to call multiple times; each call replaces only that phone's OTP.
+   */
+  async resendOtp(phone: string): Promise<void> {
+    // Find the coupleId from the existing OTP record for this phone
+    const existingToken = await prisma.otpToken.findFirst({
+      where: { phone },
+      orderBy: { createdAt: 'desc' },
+      select: { coupleId: true },
+    });
+
+    let coupleId = existingToken?.coupleId;
+
+    // Fallback: look up the user record (handles edge case where OTP was already verified/expired)
+    if (!coupleId) {
+      const user = await userRepository.findByPhone(phone);
+      coupleId = user?.coupleId ?? undefined;
+    }
+
+    if (!coupleId) {
+      throw new AppError(
+        'No active signup session found for this number. Please start registration again.',
+        400,
+        'NO_SESSION',
+      );
+    }
+
+    // Regenerate OTP for this phone only — partner's OTP is untouched
+    await otpService.generateAndStore(phone, coupleId);
+    logger.info(`[AuthService] OTP resent for ${phone} (coupleId: ${coupleId})`);
+  }
+
   async sendPartnerInvite(partnerPhone: string): Promise<boolean> {
     const inviteLink = "https://apps.apple.com/in/app/sawa-made-for-two/id514584879";
     const msg = `Hi! Your partner has invited you to join them on SAWA: ${inviteLink}`;

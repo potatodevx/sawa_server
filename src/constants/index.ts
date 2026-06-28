@@ -5,7 +5,7 @@ export const MAX_LIMIT = 100;
 
 // ─── OTP ──────────────────────────────────────────────────────────────────────
 export const OTP_LENGTH = 6;
-export const OTP_EXPIRES_IN_MINUTES = 10;
+export const OTP_EXPIRES_IN_MINUTES = 15;
 export const OTP_MAX_ATTEMPTS = 5;
 
 

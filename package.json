@@ -14,7 +14,8 @@
     "test": "jest --runInBand",
     "test:watch": "jest --watch",
     "typecheck": "tsc --noEmit",
-    "postinstall": "npx prisma generate && npm run build"
+    "postinstall": "npx prisma generate && npm run build",
+    "db:push": "npx prisma db push --accept-data-loss"
   },
   "dependencies": {
     "@prisma/client": "^6.19.2",

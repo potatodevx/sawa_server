@@ -190,6 +190,22 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
 };
 
 /**
+ * POST /api/v1/auth/resend-otp
+ * Body: { phone }
+ *
+ * Resends OTP for ONE phone only, reusing the existing coupleId.
+ * Partner's OTP is NOT affected — safe to call independently per number.
+ */
+export const resendOtp = async (req: Request, res: Response): Promise<void> => {
+  const schema = z.object({
+    phone: z.string().min(10).max(15).regex(/^\d+$/, 'Phone must contain only digits'),
+  });
+  const { phone } = schema.parse(req.body);
+  await authService.resendOtp(phone);
+  sendSuccess({ res, statusCode: 200, message: 'OTP resent' });
+};
+
+/**
  * POST /api/v1/auth/invite-partner
  * Body: { partnerPhone }
  */
