@@ -38,9 +38,11 @@ export const createSocketServer = (httpServer: HTTPServer): SocketIOServer => {
   });
 
   // ─── Redis Adapter (Scalability) ──────────────────────────────────────────
-  if (env.REDIS_URL) {
+  // Prefer internal Railway URL (no proxy hop) when running in production.
+  const redisUrl = env.REDIS_INTERNAL_URL || env.REDIS_URL;
+  if (redisUrl) {
     try {
-      const pubClient = new Redis(env.REDIS_URL, {
+      const pubClient = new Redis(redisUrl, {
         maxRetriesPerRequest: null,
       });
       const subClient = pubClient.duplicate();
@@ -54,7 +56,7 @@ export const createSocketServer = (httpServer: HTTPServer): SocketIOServer => {
       logger.error('❌ Failed to initialize Redis adapter:', err);
     }
   } else {
-    logger.warn('⚠️  REDIS_URL not found. Socket.io running without Redis adapter (Single-instance only).');
+      logger.warn('⚠️  No REDIS_URL/REDIS_INTERNAL_URL found. Socket.io running without Redis adapter (Single-instance only).');
   }
 
   io.use(async (socket: Socket, next) => {
