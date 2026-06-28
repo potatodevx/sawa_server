@@ -11,11 +11,19 @@ import {
   editMessage,
   deleteMessage,
   markChatRead,
+  createChatUploadUrl,
+  getMediaUrl,
 } from '../controllers/chat.controller';
 
 const router = Router();
 
 router.use(authenticate);
+
+// POST /api/v1/chats/upload-url — presigned URL for direct media upload (voice)
+router.post('/upload-url', asyncHandler(createChatUploadUrl));
+
+// GET /api/v1/chats/media-url — presigned download URL for stored media (voice)
+router.get('/media-url', asyncHandler(getMediaUrl));
 
 // GET /api/v1/chats/unread-counts  (private chats)
 router.get('/unread-counts', asyncHandler(getUnreadCounts));

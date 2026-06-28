@@ -148,26 +148,33 @@ export const registerChatHandlers = (io: SocketIOServer, socket: Socket): void =
             } else if (chatType === 'group') {
               const community = await prisma.community.findUnique({
                   where: { id: chatId },
-                  include: { members: true }
+                  select: {
+                    id: true,
+                    name: true,
+                    members: { select: { coupleId: true } },
+                  },
               });
               if (community) {
-                 const others = community.members.filter((m: any) => m.coupleId !== socket.coupleId);
-                 for (const member of others) {
-                    const { upsertGroupedNotification } = await import('../services/notification.service');
-                    await upsertGroupedNotification({
-                      recipientId: member.coupleId,
-                      senderId: socket.coupleId,
-                      type: 'message',
-                      title: `New in ${community.name}`,
-                      message: `New message in the group`,
-                      groupKey: `message:community:${community.id}:${socket.coupleId}`,
-                      data: {
-                        communityId: community.id,
-                        communityName: community.name,
-                        chatOnly: true,
-                      },
-                    });
-                 }
+                 const others = community.members.filter((m) => m.coupleId !== socket.coupleId);
+                 // Import once (not per member) and fan out notifications in parallel.
+                 const { upsertGroupedNotification } = await import('../services/notification.service');
+                 await Promise.all(
+                   others.map((member) =>
+                     upsertGroupedNotification({
+                       recipientId: member.coupleId,
+                       senderId: socket.coupleId!,
+                       type: 'message',
+                       title: `New in ${community.name}`,
+                       message: `New message in the group`,
+                       groupKey: `message:community:${community.id}:${socket.coupleId}`,
+                       data: {
+                         communityId: community.id,
+                         communityName: community.name,
+                         chatOnly: true,
+                       },
+                     }),
+                   ),
+                 );
               }
             }
           } catch (bgErr) {
@@ -186,27 +193,16 @@ export const registerChatHandlers = (io: SocketIOServer, socket: Socket): void =
     try {
       const coupleId = socket.coupleId;
 
-      // Find unread messages and mark them read using Prisma ORM to avoid
-      // silent type-cast failures on the PostgreSQL text[] array operators.
-      const unread = await prisma.message.findMany({
-        where: {
-          OR: [{ matchId: data.chatId }, { communityId: data.chatId }],
-          senderId: { not: coupleId },
-          NOT: { readBy: { has: coupleId } },
-        },
-        select: { id: true },
-      });
-
-      if (unread.length > 0) {
-        await Promise.all(
-          unread.map((msg) =>
-            prisma.message.update({
-              where: { id: msg.id },
-              data: { readBy: { push: coupleId } },
-            }),
-          ),
-        );
-      }
+      // Mark all unread messages read in ONE statement (array_append) instead of
+      // fetching every row and updating it individually (old N+1 pattern). The
+      // NOT(... = ANY) guard keeps it idempotent and avoids duplicate pushes.
+      await prisma.$executeRaw`
+        UPDATE "messages"
+        SET "readBy" = array_append("readBy", ${coupleId})
+        WHERE ("matchId" = ${data.chatId} OR "communityId" = ${data.chatId})
+          AND "senderId" <> ${coupleId}
+          AND NOT (${coupleId} = ANY("readBy"))
+      `;
 
       io.to(`chat:${data.chatId}`).emit(SOCKET_EVENTS.CHAT_READ, {
         chatId: data.chatId,

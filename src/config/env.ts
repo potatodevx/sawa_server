@@ -19,6 +19,13 @@ const envSchema = z.object({
   CLOUDINARY_CLOUD_NAME: z.string().optional(),
   CLOUDINARY_API_KEY: z.string().optional(),
   CLOUDINARY_API_SECRET: z.string().optional(),
+  // S3-compatible object storage (Tigris) — chat voice messages & media.
+  S3_ENDPOINT: z.string().optional(),
+  S3_REGION: z.string().default('auto'),
+  S3_BUCKET: z.string().optional(),
+  S3_ACCESS_KEY_ID: z.string().optional(),
+  S3_SECRET_ACCESS_KEY: z.string().optional(),
+  S3_PUBLIC_BASE_URL: z.string().optional(),
   RENDER_EXTERNAL_URL: z.string().optional(),
   APP_URL: z.string().optional(),
   RAILWAY_PUBLIC_DOMAIN: z.string().optional(),
