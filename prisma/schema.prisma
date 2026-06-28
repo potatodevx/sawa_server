@@ -198,6 +198,9 @@ model Message {
 
   @@index([matchId, createdAt])
   @@index([communityId, createdAt])
+  // Speeds up unread-count queries that filter by senderId within a chat.
+  @@index([matchId, senderId])
+  @@index([communityId, senderId])
   @@map("messages")
 }
 
@@ -218,6 +221,8 @@ model Notification {
   @@index([recipientId, read])
   @@index([recipientId, type])
   @@index([createdAt])
+  // Speeds up upsertMatchPending/Connected queries that filter by senderId+type.
+  @@index([senderId, type])
   @@map("notifications")
 }
 

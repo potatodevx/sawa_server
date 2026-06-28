@@ -4,6 +4,11 @@ import { coupleService } from '../services/couple.service';
 import { sendSuccess } from '../utils/response';
 import { validate } from '../middleware/validate';
 import { AppError } from '../utils/AppError';
+import {
+  getCachedCoupleProfile,
+  setCachedCoupleProfile,
+  invalidateCoupleProfile,
+} from '../lib/cache';
 
 // ─── Validation ─────────────────────────────────────────────────────────────
 
@@ -115,6 +120,7 @@ export const uploadPhotos = async (req: Request, res: Response) => {
   const data = req.body as z.infer<typeof UploadPhotosSchema>;
 
   await coupleService.uploadPhotos(coupleId!, data);
+  await invalidateCoupleProfile(coupleId!);
 
   sendSuccess({ res, statusCode: 200, message: 'Photos uploaded successfully' });
 };
@@ -128,6 +134,7 @@ export const submitAnswers = async (req: Request, res: Response) => {
   const data = req.body as z.infer<typeof SubmitAnswersSchema>;
 
   await coupleService.submitAnswers(coupleId!, data.answers);
+  await invalidateCoupleProfile(coupleId!);
 
   sendSuccess({ res, statusCode: 200, message: 'Onboarding completed successfully' });
 };
@@ -174,10 +181,22 @@ export const createCouple = async (_req: Request, _res: Response) => {
 
 export const getMyCouple = async (req: Request, res: Response) => {
   const { coupleId, userId } = req.user!;
+
+  // Serve from cache when available (invalidated by updateMyCouple, uploadPhotos, etc.)
+  const cached = await getCachedCoupleProfile(coupleId!);
+  if (cached) {
+    sendSuccess({ res, data: { couple: cached, userId } });
+    return;
+  }
+
   const couple = await coupleService.getCouple(coupleId!);
   if (!couple) {
     throw new AppError('Couple profile not found', 404);
   }
+
+  // Populate cache for subsequent calls within the TTL.
+  await setCachedCoupleProfile(coupleId!, couple);
+
   sendSuccess({ res, data: { couple, userId } });
 };
 
@@ -186,6 +205,10 @@ export const updateMyCouple = async (req: Request, res: Response) => {
   const data = req.body as any;
 
   const couple = await coupleService.updateProfile(coupleId!, data, userId);
+
+  // Update cache immediately so next GET returns fresh data.
+  if (couple) await setCachedCoupleProfile(coupleId!, couple);
+  else await invalidateCoupleProfile(coupleId!);
 
   sendSuccess({ res, statusCode: 200, message: 'Profile updated successfully', data: { couple } });
 };

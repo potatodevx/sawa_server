@@ -455,47 +455,46 @@ export class MatchService {
     const otherCoupleId =
       match.couple1Id === me.coupleId ? match.couple2Id : match.couple1Id;
 
-    await prisma.match.update({
-      where: { id: match.id },
-      data: { status: 'accepted', actionById: me.coupleId },
-    });
+    // Batch: update the match row + fetch both couple profiles in parallel.
+    const [, targetCouple, meFull] = await Promise.all([
+      prisma.match.update({
+        where: { id: match.id },
+        data: { status: 'accepted', actionById: me.coupleId },
+      }),
+      prisma.couple.findUnique({ where: { coupleId: initiatorCoupleId } }),
+      prisma.couple.findUnique({ where: { coupleId: me.coupleId } }),
+    ]);
 
-    const targetCouple = await prisma.couple.findUnique({
-      where: { coupleId: initiatorCoupleId },
-    });
-    const meCouple = await prisma.couple.findUnique({
-      where: { coupleId: me.coupleId },
-      select: { profileName: true, coupleId: true },
-    });
-
-    if (targetCouple && meCouple) {
-      const meFull = await prisma.couple.findUnique({ where: { coupleId: me.coupleId } });
-      await upsertMatchConnectedNotification({
-        recipientId: me.coupleId,
-        senderId: targetCouple.coupleId,
-        matchId: match.id,
-        coupleId: targetCouple.coupleId,
-        profileName: targetCouple.profileName || 'Couple',
-        primaryPhoto: targetCouple.primaryPhoto,
-        location: targetCouple.locationCity,
-        bio: targetCouple.bio,
-        tags: targetCouple.activities,
-        vibes: targetCouple.socialVibes,
-        matchCriteria: targetCouple.matchCriteria,
-      });
-      await upsertMatchConnectedNotification({
-        recipientId: targetCouple.coupleId,
-        senderId: me.coupleId,
-        matchId: match.id,
-        coupleId: me.coupleId,
-        profileName: meCouple.profileName || 'Couple',
-        primaryPhoto: meFull?.primaryPhoto,
-        location: meFull?.locationCity,
-        bio: meFull?.bio,
-        tags: meFull?.activities,
-        vibes: meFull?.socialVibes,
-        matchCriteria: meFull?.matchCriteria,
-      });
+    if (targetCouple && meFull) {
+      // Fire both connected notifications in parallel.
+      await Promise.all([
+        upsertMatchConnectedNotification({
+          recipientId: me.coupleId,
+          senderId: targetCouple.coupleId,
+          matchId: match.id,
+          coupleId: targetCouple.coupleId,
+          profileName: targetCouple.profileName || 'Couple',
+          primaryPhoto: targetCouple.primaryPhoto,
+          location: targetCouple.locationCity,
+          bio: targetCouple.bio,
+          tags: targetCouple.activities,
+          vibes: targetCouple.socialVibes,
+          matchCriteria: targetCouple.matchCriteria,
+        }),
+        upsertMatchConnectedNotification({
+          recipientId: targetCouple.coupleId,
+          senderId: me.coupleId,
+          matchId: match.id,
+          coupleId: me.coupleId,
+          profileName: meFull.profileName || 'Couple',
+          primaryPhoto: meFull.primaryPhoto,
+          location: meFull.locationCity,
+          bio: meFull.bio,
+          tags: meFull.activities,
+          vibes: meFull.socialVibes,
+          matchCriteria: meFull.matchCriteria,
+        }),
+      ]);
 
       const io = (global as any).io;
       if (io) {

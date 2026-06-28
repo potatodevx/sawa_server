@@ -3,14 +3,18 @@ import { prisma } from '../lib/prisma';
 import { sendSuccess } from '../utils/response';
 import { AppError } from '../utils/AppError';
 import { dedupeNotificationsForList } from '../services/notification.service';
+import {
+  getCachedNotifUnreadCount,
+  setCachedNotifUnreadCount,
+  invalidateNotifUnreadCount,
+} from '../lib/cache';
 
 export const getNotifications = async (req: Request, res: Response): Promise<void> => {
   const { coupleId } = req.user!;
-  const me = await prisma.couple.findUnique({ where: { coupleId } });
-  if (!me) throw new AppError('Couple profile not found', 404);
+  // coupleId comes from the verified JWT — no extra couple lookup needed.
 
   const notifications = await prisma.notification.findMany({ 
-    where: { recipientId: me.coupleId },
+    where: { recipientId: coupleId },
     include: {
       sender: { select: { id: true, profileName: true, primaryPhoto: true } }
     },
@@ -63,21 +67,32 @@ export const getNotifications = async (req: Request, res: Response): Promise<voi
 };
 
 export const markAsRead = async (req: Request, res: Response): Promise<void> => {
+  const { coupleId } = req.user!;
   const { id } = req.params;
   await prisma.notification.update({
     where: { id },
     data: { read: true }
   });
+  // Bust cached unread count for this user.
+  if (coupleId) await invalidateNotifUnreadCount(coupleId);
   sendSuccess({ res, statusCode: 200, message: 'Notification marked as read' });
 };
 
 export const getUnreadCount = async (req: Request, res: Response): Promise<void> => {
-   const { coupleId } = req.user!;
-   const me = await prisma.couple.findUnique({ where: { coupleId } });
-   if (!me) throw new AppError('Couple profile not found', 404);
-   
-   const count = await prisma.notification.count({ 
-     where: { recipientId: me.coupleId, read: false }
-   });
-   sendSuccess({ res, statusCode: 200, data: { count } });
+  const { coupleId } = req.user!;
+  if (!coupleId) throw new AppError('Couple ID required', 400);
+
+  // Short-lived cache (10 s) so repeated badge-refresh calls don't hit Postgres.
+  // Invalidated every time a new notification is created/marked read.
+  const cached = await getCachedNotifUnreadCount(coupleId);
+  if (cached !== null) {
+    sendSuccess({ res, statusCode: 200, data: { count: cached } });
+    return;
+  }
+
+  const count = await prisma.notification.count({ 
+    where: { recipientId: coupleId, read: false }
+  });
+  await setCachedNotifUnreadCount(coupleId, count);
+  sendSuccess({ res, statusCode: 200, data: { count } });
 };

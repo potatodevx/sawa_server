@@ -1,6 +1,7 @@
 import { prisma } from '../lib/prisma';
 import type { NotificationType } from '@prisma/client';
 import { emitRealtimeNotification } from '../utils/realtime';
+import { invalidateNotifUnreadCount } from '../lib/cache';
 
 type NotificationData = Record<string, unknown>;
 
@@ -101,12 +102,16 @@ async function findByGroupKey(
   type: NotificationType,
   groupKey: string,
 ) {
-  const rows = await prisma.notification.findMany({
-    where: { recipientId, type },
+  // Was: fetch up to 80 rows + JS scan.
+  // Now: single row read using PostgreSQL JSON-path filter on _groupKey.
+  return prisma.notification.findFirst({
+    where: {
+      recipientId,
+      type,
+      data: { path: ['_groupKey'], equals: groupKey },
+    } as any,
     orderBy: { createdAt: 'desc' },
-    take: 80,
   });
-  return rows.find((r) => (r.data as NotificationData)?._groupKey === groupKey) ?? null;
 }
 
 /** Replace older duplicates instead of inserting another row. */
@@ -155,6 +160,9 @@ export async function upsertGroupedNotification(params: {
     });
   }
 
+  // Bust the cached unread count so the badge refreshes immediately.
+  invalidateNotifUnreadCount(params.recipientId).catch(() => {});
+
   return notification;
 }
 
@@ -162,20 +170,24 @@ export async function upsertGroupedNotification(params: {
 export async function clearNotificationsForMatch(matchId: string, options?: {
   keepConnectedForRecipients?: string[];
 }) {
+  const keep = new Set(options?.keepConnectedForRecipients || []);
+
+  // Was: fetch 500 rows across all types + JS filter on matchId.
+  // Now: use Prisma JSON-path filter so the DB only returns rows for this matchId.
   const rows = await prisma.notification.findMany({
-    where: { type: { in: ['match', 'message'] } },
+    where: {
+      type: { in: ['match', 'message'] },
+      data: { path: ['matchId'], equals: matchId },
+    } as any,
     select: { id: true, data: true, recipientId: true, type: true },
-    take: 500,
   });
 
-  const keep = new Set(options?.keepConnectedForRecipients || []);
   const idsToDelete = rows
     .filter((r) => {
       const d = r.data as NotificationData;
-      if (d?.matchId !== matchId) return false;
       if (
         r.type === 'match' &&
-        d.isPending === false &&
+        d?.isPending === false &&
         keep.has(r.recipientId)
       ) {
         return false;
@@ -202,15 +214,19 @@ export async function upsertMatchPendingNotification(params: {
   vibes?: unknown;
   matchCriteria?: unknown;
 }) {
-  const stale = await prisma.notification.findMany({
-    where: { recipientId: params.recipientId, type: 'match', senderId: params.senderId },
+  // Was: fetch all match notifications from sender + JS filter.
+  // Now: JSON-path DB filter on matchId + isPending to retrieve only relevant rows.
+  const staleRows = await prisma.notification.findMany({
+    where: {
+      recipientId: params.recipientId,
+      senderId: params.senderId,
+      type: 'match',
+      data: { path: ['matchId'], equals: params.matchId },
+    } as any,
     select: { id: true, data: true },
   });
-  const staleIds = stale
-    .filter((r) => {
-      const d = r.data as NotificationData;
-      return d?.matchId === params.matchId && d?.isPending === true;
-    })
+  const staleIds = staleRows
+    .filter((r) => (r.data as NotificationData)?.isPending === true)
     .map((r) => r.id);
   if (staleIds.length) {
     await prisma.notification.deleteMany({ where: { id: { in: staleIds } } });
@@ -252,18 +268,18 @@ export async function upsertMatchConnectedNotification(params: {
   vibes?: unknown;
   matchCriteria?: unknown;
 }) {
-  // Delete ALL pending match notifications from this sender to this recipient —
-  // covers stale records where a second match row exists for the same couple pair.
+  // Delete ALL pending match notifications from this sender to this recipient.
+  // Was: fetch all + JS filter for isPending. Now: JSON-path filter on isPending.
   const pendingRows = await prisma.notification.findMany({
-    where: { recipientId: params.recipientId, senderId: params.senderId, type: 'match' },
-    select: { id: true, data: true },
+    where: {
+      recipientId: params.recipientId,
+      senderId: params.senderId,
+      type: 'match',
+      data: { path: ['isPending'], equals: true },
+    } as any,
+    select: { id: true },
   });
-  const pendingIds = pendingRows
-    .filter((r) => {
-      const d = r.data as NotificationData;
-      return d?.isPending === true;
-    })
-    .map((r) => r.id);
+  const pendingIds = pendingRows.map((r) => r.id);
   if (pendingIds.length) {
     await prisma.notification.deleteMany({ where: { id: { in: pendingIds } } });
   }

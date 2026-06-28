@@ -25,40 +25,55 @@ export const getUnreadCounts = async (req: Request, res: Response): Promise<void
 
   const counts: Record<string, { unreadCount: number; lastMessage: string | null; lastMessageTime: string | null }> = {};
 
-  await Promise.all(
-    matches.map(async (match) => {
-      const [unreadCount, lastMsg] = await Promise.all([
-        prisma.message.count({
-          where: {
-            matchId: match.id,
-            chatType: 'private',
-            senderId: { not: coupleId },
-            NOT: { readBy: { has: coupleId } },
-          },
-        }),
-        prisma.message.findFirst({
-          where: { matchId: match.id, chatType: 'private' },
-          orderBy: { createdAt: 'desc' },
-          select: { content: true, createdAt: true, contentType: true },
-        }),
-      ]);
+  if (matches.length === 0) {
+    sendSuccess({ res, data: { counts } });
+    return;
+  }
 
-      counts[match.id] = {
-        unreadCount,
-        lastMessage:
-          lastMsg
-            ? lastMsg.contentType === 'text'
-              ? lastMsg.content
-              : lastMsg.contentType === 'audio'
-              ? 'Voice message'
-              : lastMsg.contentType === 'image'
-              ? 'Photo'
-              : lastMsg.content
-            : null,
-        lastMessageTime: lastMsg?.createdAt?.toISOString() ?? null,
-      };
-    }),
-  );
+  const matchIds = matches.map((m) => m.id);
+
+  // Was: 2×N queries (count + findFirst per match).
+  // Now: 2 bulk queries total regardless of how many matches exist.
+  const [unreadRows, lastMsgRows] = await Promise.all([
+    // Unread count per matchId in one GROUP BY query.
+    prisma.$queryRaw<Array<{ matchId: string; unreadCount: bigint }>>`
+      SELECT "matchId", COUNT(*) AS "unreadCount"
+      FROM "messages"
+      WHERE "matchId" = ANY(${matchIds}::text[])
+        AND "chatType" = 'private'
+        AND "senderId" != ${coupleId}
+        AND NOT (${coupleId} = ANY("readBy"))
+      GROUP BY "matchId"
+    `,
+    // Latest message per matchId using DISTINCT ON (single pass).
+    prisma.$queryRaw<Array<{ matchId: string; content: string; contentType: string; createdAt: Date }>>`
+      SELECT DISTINCT ON ("matchId") "matchId", content, "contentType", "createdAt"
+      FROM "messages"
+      WHERE "matchId" = ANY(${matchIds}::text[])
+        AND "chatType" = 'private'
+      ORDER BY "matchId", "createdAt" DESC
+    `,
+  ]);
+
+  const unreadByMatch = new Map(unreadRows.map((r) => [r.matchId, Number(r.unreadCount)]));
+  const lastMsgByMatch = new Map(lastMsgRows.map((r) => [r.matchId, r]));
+
+  for (const { id: matchId } of matches) {
+    const lastMsg = lastMsgByMatch.get(matchId);
+    counts[matchId] = {
+      unreadCount: unreadByMatch.get(matchId) ?? 0,
+      lastMessage: lastMsg
+        ? lastMsg.contentType === 'text'
+          ? lastMsg.content
+          : lastMsg.contentType === 'audio'
+          ? 'Voice message'
+          : lastMsg.contentType === 'image'
+          ? 'Photo'
+          : lastMsg.content
+        : null,
+      lastMessageTime: lastMsg?.createdAt?.toISOString() ?? null,
+    };
+  }
 
   sendSuccess({ res, data: { counts } });
 };
@@ -79,45 +94,58 @@ export const getGroupUnreadCounts = async (req: Request, res: Response): Promise
     { unreadCount: number; lastMessage: string | null; lastMessageTime: string | null }
   > = {};
 
-  await Promise.all(
-    memberships.map(async ({ communityId }) => {
-      const [unreadCount, lastMsg] = await Promise.all([
-        prisma.message.count({
-          where: {
-            chatType: 'group',
-            communityId,
-            senderId: { not: coupleId },
-            NOT: { readBy: { has: coupleId } },
-          },
-        }),
-        prisma.message.findFirst({
-          where: { chatType: 'group', communityId },
-          orderBy: { createdAt: 'desc' },
-          select: { content: true, createdAt: true, contentType: true, senderName: true },
-        }),
-      ]);
+  if (memberships.length === 0) {
+    sendSuccess({ res, data: { counts } });
+    return;
+  }
 
-      let lastMessagePreview: string | null = null;
-      if (lastMsg) {
-        const firstName = (lastMsg.senderName || 'Someone').split(' ')[0];
-        const text =
-          lastMsg.contentType === 'text'
-            ? lastMsg.content
-            : lastMsg.contentType === 'audio'
-            ? 'Voice message'
-            : lastMsg.contentType === 'image'
-            ? 'Photo'
-            : lastMsg.content;
-        lastMessagePreview = `${firstName}: ${text}`;
-      }
+  const communityIds = memberships.map((m) => m.communityId);
 
-      counts[communityId] = {
-        unreadCount,
-        lastMessage: lastMessagePreview,
-        lastMessageTime: lastMsg?.createdAt?.toISOString() ?? null,
-      };
-    }),
-  );
+  // Was: 2×N queries per community.
+  // Now: 2 bulk queries total.
+  const [unreadRows, lastMsgRows] = await Promise.all([
+    prisma.$queryRaw<Array<{ communityId: string; unreadCount: bigint }>>`
+      SELECT "communityId", COUNT(*) AS "unreadCount"
+      FROM "messages"
+      WHERE "communityId" = ANY(${communityIds}::text[])
+        AND "chatType" = 'group'
+        AND "senderId" != ${coupleId}
+        AND NOT (${coupleId} = ANY("readBy"))
+      GROUP BY "communityId"
+    `,
+    prisma.$queryRaw<Array<{ communityId: string; content: string; contentType: string; createdAt: Date; senderName: string }>>`
+      SELECT DISTINCT ON ("communityId") "communityId", content, "contentType", "createdAt", "senderName"
+      FROM "messages"
+      WHERE "communityId" = ANY(${communityIds}::text[])
+        AND "chatType" = 'group'
+      ORDER BY "communityId", "createdAt" DESC
+    `,
+  ]);
+
+  const unreadByCommunity = new Map(unreadRows.map((r) => [r.communityId, Number(r.unreadCount)]));
+  const lastMsgByCommunity = new Map(lastMsgRows.map((r) => [r.communityId, r]));
+
+  for (const { communityId } of memberships) {
+    const lastMsg = lastMsgByCommunity.get(communityId);
+    let lastMessagePreview: string | null = null;
+    if (lastMsg) {
+      const firstName = (lastMsg.senderName || 'Someone').split(' ')[0];
+      const text =
+        lastMsg.contentType === 'text'
+          ? lastMsg.content
+          : lastMsg.contentType === 'audio'
+          ? 'Voice message'
+          : lastMsg.contentType === 'image'
+          ? 'Photo'
+          : lastMsg.content;
+      lastMessagePreview = `${firstName}: ${text}`;
+    }
+    counts[communityId] = {
+      unreadCount: unreadByCommunity.get(communityId) ?? 0,
+      lastMessage: lastMessagePreview,
+      lastMessageTime: lastMsg?.createdAt?.toISOString() ?? null,
+    };
+  }
 
   sendSuccess({ res, data: { counts } });
 };

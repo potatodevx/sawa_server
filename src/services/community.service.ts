@@ -172,55 +172,57 @@ export class CommunityService {
     });
 
     if (data.invitedCoupleIds && data.invitedCoupleIds.length > 0) {
-      for (const rawId of data.invitedCoupleIds) {
-        try {
-          const targetCouple = await prisma.couple.findUnique({
-            where: rawId.includes('-') ? { coupleId: rawId } : { id: rawId },
-            select: { coupleId: true }
-          });
-          if (!targetCouple) continue;
-          const targetCoupleId = targetCouple.coupleId;
+      // Process all invites in parallel instead of serially.
+      await Promise.all(
+        (data.invitedCoupleIds as string[]).map(async (rawId) => {
+          try {
+            const targetCouple = await prisma.couple.findUnique({
+              where: rawId.includes('-') ? { coupleId: rawId } : { id: rawId },
+              select: { coupleId: true },
+            });
+            if (!targetCouple) return;
+            const targetCoupleId = targetCouple.coupleId;
 
-          const match = await prisma.match.findFirst({
-            where: {
-              OR: [
-                { couple1Id: me.coupleId, couple2Id: targetCoupleId, status: 'accepted' },
-                { couple1Id: targetCoupleId, couple2Id: me.coupleId, status: 'accepted' }
-              ]
-            }
-          });
+            const match = await prisma.match.findFirst({
+              where: {
+                OR: [
+                  { couple1Id: me.coupleId, couple2Id: targetCoupleId, status: 'accepted' },
+                  { couple1Id: targetCoupleId, couple2Id: me.coupleId, status: 'accepted' },
+                ],
+              },
+            });
 
-          if (match) {
-            const notification = await prisma.notification.create({
-              data: {
-                recipientId: targetCoupleId,
-                senderId: me.coupleId,
-                type: 'community',
-                title: 'Community Invitation',
-                message: `${me.profileName} invited you to join ${community.name}`,
+            if (match) {
+              const notification = await prisma.notification.create({
                 data: {
-                  communityId: community.id,
-                  name: community.name,
-                  communityName: community.name,
-                  isInvited: true,
-                  invited: true,
-                  status: 'invited',
-                }
-              }
-            });
-
-            emitRealtimeNotification(targetCoupleId, {
-              notificationId: notification.id,
-              type: notification.type,
-              title: notification.title,
-              message: notification.message,
-              data: notification.data,
-            });
+                  recipientId: targetCoupleId,
+                  senderId: me.coupleId,
+                  type: 'community',
+                  title: 'Community Invitation',
+                  message: `${me.profileName} invited you to join ${community.name}`,
+                  data: {
+                    communityId: community.id,
+                    name: community.name,
+                    communityName: community.name,
+                    isInvited: true,
+                    invited: true,
+                    status: 'invited',
+                  },
+                },
+              });
+              emitRealtimeNotification(targetCoupleId, {
+                notificationId: notification.id,
+                type: notification.type,
+                title: notification.title,
+                message: notification.message,
+                data: notification.data,
+              });
+            }
+          } catch (err) {
+            logger.error(`[CommunityService] Failed to notify couple ${rawId}: ${err}`);
           }
-        } catch (err) {
-          logger.error(`[CommunityService] Failed to notify couple ${rawId}: ${err}`);
-        }
-      }
+        }),
+      );
     }
 
     this.invalidateCommListCache(requestingCoupleId);
@@ -279,17 +281,20 @@ export class CommunityService {
       primaryPhoto: me.primaryPhoto || null,
     };
 
-    for (const admin of admins) {
-      await upsertGroupedNotification({
-        recipientId: admin.coupleId,
-        senderId: me.coupleId,
-        type: 'community',
-        title: 'New Join Request',
-        message: `${me.profileName} wants to join.`,
-        groupKey: `community:join:${communityId}:${me.coupleId}`,
-        data: notificationData,
-      });
-    }
+    // Notify all admins in parallel instead of sequentially.
+    await Promise.all(
+      admins.map((admin) =>
+        upsertGroupedNotification({
+          recipientId: admin.coupleId,
+          senderId: me.coupleId,
+          type: 'community',
+          title: 'New Join Request',
+          message: `${me.profileName} wants to join.`,
+          groupKey: `community:join:${communityId}:${me.coupleId}`,
+          data: notificationData,
+        }),
+      ),
+    );
 
     this.invalidateCommListCache(requestingCoupleId);
     return { status: 'requested' };
@@ -605,75 +610,71 @@ export class CommunityService {
     const community = await prisma.community.findUnique({ where: { id: communityId } });
     if (!community) throw new AppError('Community not found', 404);
 
-    for (const rawId of invitedCoupleIds) {
-      try {
-        const targetCouple = await prisma.couple.findUnique({
-          where: rawId.includes('-') ? { coupleId: rawId } : { id: rawId },
-          select: { coupleId: true }
-        });
-        if (!targetCouple) continue;
-
-        const isAlreadyMember = await prisma.communityMember.findUnique({
-          where: {
-            communityId_coupleId: {
-              communityId,
-              coupleId: targetCouple.coupleId,
-            },
-          },
-        });
-
-        if (isAlreadyMember) {
-          continue;
-        }
-
-        const existingInvite = await prisma.notification.findFirst({
-          where: {
-            recipientId: targetCouple.coupleId,
-            type: 'community',
-            data: { path: ['communityId'], equals: community.id } as any,
-          },
-        });
-
-        if (existingInvite) {
-          emitRealtimeNotification(targetCouple.coupleId, {
-            notificationId: existingInvite.id,
-            type: existingInvite.type,
-            title: existingInvite.title,
-            message: existingInvite.message,
-            data: existingInvite.data,
+    // Process all invites in parallel instead of sequentially.
+    await Promise.all(
+      invitedCoupleIds.map(async (rawId) => {
+        try {
+          const targetCouple = await prisma.couple.findUnique({
+            where: rawId.includes('-') ? { coupleId: rawId } : { id: rawId },
+            select: { coupleId: true },
           });
-          continue;
-        }
+          if (!targetCouple) return;
 
-        const notification = await prisma.notification.create({
-          data: {
-            recipientId: targetCouple.coupleId,
-            senderId: me.coupleId,
-            type: 'community',
-            title: 'Community Invitation',
-            message: `${me.profileName} invited you to join ${community.name}`,
-            data: {
-              communityId: community.id,
-              name: community.name,
-              communityName: community.name,
-              isInvited: true,
-              invited: true,
-              status: 'invited',
-            }
+          const [isAlreadyMember, existingInvite] = await Promise.all([
+            prisma.communityMember.findUnique({
+              where: { communityId_coupleId: { communityId, coupleId: targetCouple.coupleId } },
+            }),
+            prisma.notification.findFirst({
+              where: {
+                recipientId: targetCouple.coupleId,
+                type: 'community',
+                data: { path: ['communityId'], equals: community.id } as any,
+              },
+            }),
+          ]);
+
+          if (isAlreadyMember) return;
+
+          if (existingInvite) {
+            emitRealtimeNotification(targetCouple.coupleId, {
+              notificationId: existingInvite.id,
+              type: existingInvite.type,
+              title: existingInvite.title,
+              message: existingInvite.message,
+              data: existingInvite.data,
+            });
+            return;
           }
-        });
 
-        emitRealtimeNotification(targetCouple.coupleId, {
-          notificationId: notification.id,
-          type: notification.type,
-          title: notification.title,
-          message: notification.message,
-          data: notification.data,
-        });
-      } catch (err) {
-        logger.error(`[CommunityService] Failed to invite couple ${rawId}: ${err}`);
-      }
-    }
+          const notification = await prisma.notification.create({
+            data: {
+              recipientId: targetCouple.coupleId,
+              senderId: me.coupleId,
+              type: 'community',
+              title: 'Community Invitation',
+              message: `${me.profileName} invited you to join ${community.name}`,
+              data: {
+                communityId: community.id,
+                name: community.name,
+                communityName: community.name,
+                isInvited: true,
+                invited: true,
+                status: 'invited',
+              },
+            },
+          });
+          emitRealtimeNotification(targetCouple.coupleId, {
+            notificationId: notification.id,
+            type: notification.type,
+            title: notification.title,
+            message: notification.message,
+            data: notification.data,
+          });
+        } catch (err) {
+          logger.error(`[CommunityService] Failed to invite couple ${rawId}: ${err}`);
+        }
+      }),
+    );
     return { success: true };
   }
 }
