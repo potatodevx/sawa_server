@@ -113,4 +113,73 @@ router.get('/partner-feeling', authenticate, async (req: Request, res: Response)
   }
 });
 
+const PLANNED_DATES_TTL = 365 * 24 * 60 * 60; // 1 year
+
+/**
+ * POST /api/v1/us/planned-dates
+ * Add or update a planned date entry for the couple.
+ * Body: { activity, date, rawDate, from?, time?, note? }
+ */
+router.post('/planned-dates', authenticate, async (req: Request, res: Response): Promise<void> => {
+  const coupleId = req.user?.coupleId;
+  if (!coupleId) { res.status(400).json({ success: false, error: 'Missing couple context' }); return; }
+
+  const { activity, date, rawDate, from, time, note } = req.body as Record<string, string>;
+  if (!activity || !rawDate) { res.status(400).json({ success: false, error: 'activity and rawDate are required' }); return; }
+
+  try {
+    const key = `us:planned_dates:${coupleId}`;
+    const raw = await cacheGet(key);
+    const prev: any[] = raw ? JSON.parse(raw) : [];
+    const entry = { activity, date: date ?? rawDate, rawDate, from: from ?? 'Partner', time, note };
+    const updated = [...prev.filter((p: any) => p.rawDate !== rawDate), entry];
+    await cacheSet(key, JSON.stringify(updated), PLANNED_DATES_TTL);
+    res.json({ success: true });
+  } catch (err: any) {
+    logger.warn(`[UsRoutes] planned-dates POST error: ${err.message}`);
+    res.status(500).json({ success: false, error: 'Failed to save planned date' });
+  }
+});
+
+/**
+ * GET /api/v1/us/planned-dates
+ * Returns all planned dates for the couple.
+ */
+router.get('/planned-dates', authenticate, async (req: Request, res: Response): Promise<void> => {
+  const coupleId = req.user?.coupleId;
+  if (!coupleId) { res.json({ success: true, data: [] }); return; }
+
+  try {
+    const key = `us:planned_dates:${coupleId}`;
+    const raw = await cacheGet(key);
+    const dates = raw ? JSON.parse(raw) : [];
+    res.json({ success: true, data: dates });
+  } catch (err: any) {
+    logger.warn(`[UsRoutes] planned-dates GET error: ${err.message}`);
+    res.json({ success: true, data: [] });
+  }
+});
+
+/**
+ * DELETE /api/v1/us/planned-dates/:rawDate
+ * Remove a planned date by rawDate (YYYY-MM-DD).
+ */
+router.delete('/planned-dates/:rawDate', authenticate, async (req: Request, res: Response): Promise<void> => {
+  const coupleId = req.user?.coupleId;
+  const { rawDate } = req.params;
+  if (!coupleId || !rawDate) { res.status(400).json({ success: false }); return; }
+
+  try {
+    const key = `us:planned_dates:${coupleId}`;
+    const raw = await cacheGet(key);
+    const prev: any[] = raw ? JSON.parse(raw) : [];
+    const updated = prev.filter((p: any) => p.rawDate !== rawDate);
+    await cacheSet(key, JSON.stringify(updated), PLANNED_DATES_TTL);
+    res.json({ success: true });
+  } catch (err: any) {
+    logger.warn(`[UsRoutes] planned-dates DELETE error: ${err.message}`);
+    res.status(500).json({ success: false });
+  }
+});
+
 export default router;
