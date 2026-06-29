@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { authenticate } from '../middleware/auth.middleware';
+import { authenticate } from '../middleware/authenticate';
 import { cacheGet } from '../lib/cache';
 import { prisma } from '../lib/prisma';
 import { logger } from '../utils/logger';
@@ -13,8 +13,13 @@ const router = Router();
  * event). Falls back to null if nothing has been shared yet.
  */
 router.get('/partner-feeling', authenticate, async (req: Request, res: Response): Promise<void> => {
-  const coupleId = req.coupleId!;
-  const myUserId = req.userId!;
+  const coupleId = req.user?.coupleId;
+  const myUserId = req.user?.userId;
+
+  if (!coupleId || !myUserId) {
+    res.json({ success: true, data: null });
+    return;
+  }
 
   try {
     // Find the partner's userId
