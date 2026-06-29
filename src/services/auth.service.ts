@@ -58,27 +58,25 @@ export class AuthService {
 
     const coupleId = crypto.randomUUID();
 
-    // Ensure the Couple entity exists first to satisfy foreign key constraints for the User records
+    // One upsert (not two) — FK constraint satisfied before user rows are created.
     await prisma.couple.upsert({
       where: { coupleId },
       update: {},
-      create: { coupleId, profileName: 'Sawa Couple' }
+      create: { coupleId, profileName: 'Sawa Couple' },
     });
 
-    // Ensure Couple exists before User due to FK constraint
-    await prisma.couple.upsert({
-      where: { coupleId },
-      update: {},
-      create: { coupleId },
-    });
-
-    await userRepository.upsertByPhone(yourPhone, coupleId, 'primary');
-    await userRepository.upsertByPhone(partnerPhone, coupleId, 'partner');
-
+    // Both user rows + both OTPs can be kicked off in parallel once the couple row exists.
     const partnerCodeMsg = `Welcome to SAWA! Use {{code}} to verify your shared profile. Download it here: https://apps.apple.com/in/app/sawa-made-for-two/id514584879`;
 
-    await otpService.generateAndStore(yourPhone, coupleId);
-    await otpService.generateAndStore(partnerPhone, coupleId, partnerCodeMsg);
+    await Promise.all([
+      userRepository.upsertByPhone(yourPhone, coupleId, 'primary'),
+      userRepository.upsertByPhone(partnerPhone, coupleId, 'partner'),
+    ]);
+
+    await Promise.all([
+      otpService.generateAndStore(yourPhone, coupleId),
+      otpService.generateAndStore(partnerPhone, coupleId, partnerCodeMsg),
+    ]);
 
     logger.info(`[AuthService] OTPs issued for entity: ${coupleId}`);
     return { coupleId };
@@ -102,9 +100,12 @@ export class AuthService {
       role: string;
     };
   }> {
-    const [yourResult, partnerResult] = await Promise.all([
+    // Verify OTPs and fetch existing user records in one parallel shot.
+    const [yourResult, partnerResult, existingYours, existingPartner] = await Promise.all([
       otpService.verify(yourPhone, yourOtp),
       otpService.verify(partnerPhone, partnerOtp),
+      userRepository.findByPhone(yourPhone),
+      userRepository.findByPhone(partnerPhone),
     ]);
 
     if (!yourResult.valid) {
@@ -116,29 +117,20 @@ export class AuthService {
 
     const coupleId = yourResult.coupleId!;
 
-    // 1. Ensure the parent Couple exists first (sequentially to avoid race conditions)
-    const existingYours = await userRepository.findByPhone(yourPhone);
-    const existingPartner = await userRepository.findByPhone(partnerPhone);
-    
-    const defaultName = (existingYours?.name || existingPartner?.name) 
-        ? `${existingYours?.name || 'User'} & ${existingPartner?.name || 'Partner'}`
-        : 'Sawa Couple';
+    const defaultName = (existingYours?.name || existingPartner?.name)
+      ? `${existingYours?.name || 'User'} & ${existingPartner?.name || 'Partner'}`
+      : 'Sawa Couple';
 
-    await prisma.couple.upsert({
+    // Ensure couple row exists (FK constraint) then upsert users in parallel.
+    const couple = await prisma.couple.upsert({
       where: { coupleId },
       update: {},
-      create: { 
-        coupleId,
-        profileName: defaultName,
-        isProfileComplete: false,
-        isSubscribed: false
-      }
+      create: { coupleId, profileName: defaultName, isProfileComplete: false, isSubscribed: false },
     });
 
-    // 2. Now upsert users in parallel
     await Promise.all([
       userRepository.upsertByPhone(yourPhone, coupleId, 'primary'),
-      userRepository.upsertByPhone(partnerPhone, coupleId, 'partner')
+      userRepository.upsertByPhone(partnerPhone, coupleId, 'partner'),
     ]);
 
     const [yourUser, partnerUser] = await Promise.all([
@@ -146,7 +138,7 @@ export class AuthService {
       userRepository.markVerified(partnerPhone),
     ]);
 
-    const couple = await prisma.couple.findUnique({ where: { coupleId } });
+    // `couple` is already available from the upsert above — no extra findUnique needed.
 
     const yourAccessToken = signAccessToken({
       userId: yourUser.id,
@@ -242,20 +234,13 @@ export class AuthService {
     if (getBypassPhones().has(phone)) {
       logger.info(`[AuthService] Bypass login for ${phone}`);
 
-      let couple = user.coupleId
-        ? await prisma.couple.findUnique({ where: { coupleId: user.coupleId } })
+      const couple = user.coupleId
+        ? await prisma.couple.upsert({
+            where: { coupleId: user.coupleId },
+            update: {},
+            create: { coupleId: user.coupleId, profileName: user.name || 'Sawa Couple', isProfileComplete: false, isSubscribed: false },
+          })
         : null;
-
-      if (!couple && user.coupleId) {
-        couple = await prisma.couple.create({
-          data: {
-            coupleId: user.coupleId,
-            profileName: user.name || 'Sawa Couple',
-            isProfileComplete: false,
-            isSubscribed: false,
-          },
-        });
-      }
 
       const accessToken = signAccessToken({
         userId: user.id,
@@ -298,61 +283,58 @@ export class AuthService {
       role: string;
     };
   }> {
-    const result = await otpService.verify(phone, otp);
+    // OTP verify + user lookup in parallel — saves one DB round trip.
+    const [result, user] = await Promise.all([
+      otpService.verify(phone, otp),
+      userRepository.findByPhone(phone),
+    ]);
 
     if (!result.valid || !result.coupleId) {
       throw new AppError('Invalid or expired OTP', 400, 'INVALID_OTP');
     }
-
-    const user = await userRepository.findByPhone(phone);
-    const coupleId = result.coupleId;
-
     if (!user) {
       throw new AppError('No account found with this number.', 404, 'USER_NOT_FOUND');
     }
 
-    await assertNotBanned(user.coupleId || coupleId);
+    const coupleId = user.coupleId || result.coupleId;
 
-    let couple = null;
-    if (user.coupleId) {
-      couple = await prisma.couple.findUnique({ where: { coupleId: user.coupleId } });
-      
-      if (!couple) {
-        couple = await prisma.couple.create({
-          data: {
-            coupleId: user.coupleId,
-            profileName: user.name || 'Sawa Couple',
-            isProfileComplete: false,
-            isSubscribed: false,
-          }
-        });
-      }
-    }
+    await assertNotBanned(coupleId);
+
+    // Upsert couple (handles missing row) — single query, not a find + conditional create.
+    const couple = await prisma.couple.upsert({
+      where: { coupleId },
+      update: {},
+      create: {
+        coupleId,
+        profileName: user.name || 'Sawa Couple',
+        isProfileComplete: false,
+        isSubscribed: false,
+      },
+    });
 
     const accessToken = signAccessToken({
       userId: user.id,
-      coupleMongoId: couple?.id || undefined,
-      coupleId: user.coupleId || undefined,
+      coupleMongoId: couple.id,
+      coupleId,
     });
-    
     const refreshToken = signRefreshToken({
       userId: user.id,
-      coupleMongoId: couple?.id || undefined,
-      coupleId: user.coupleId || undefined,
+      coupleMongoId: couple.id,
+      coupleId,
     });
 
     await userRepository.saveRefreshTokenHash(user.id, hashToken(refreshToken));
 
     return {
-      coupleId: user.coupleId || '',
+      coupleId,
       token: { accessToken, refreshToken },
-      profile: couple ? ({ ...couple, _id: (couple as any).id }) : null,
+      profile: { ...couple, _id: couple.id },
       user: {
         id: user.id,
         _id: user.id,
         name: user.name || '',
-        role: user.role as any
-      } as any
+        role: user.role as any,
+      } as any,
     };
   }
 
