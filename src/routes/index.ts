@@ -9,6 +9,7 @@ import notificationRoutes from './notification.routes';
 import adminRoutes from './admin.routes';
 import promptRoutes from './prompt.routes';
 import reportRoutes from './report.routes';
+import usRoutes from './us.routes';
 
 const router = Router();
 
@@ -22,5 +23,6 @@ router.use('/notifications', notificationRoutes);
 router.use('/admin', adminRoutes);
 router.use('/prompts', promptRoutes);
 router.use('/reports', reportRoutes);
+router.use('/us', usRoutes);
 
 export default router;

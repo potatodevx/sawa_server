@@ -2,7 +2,11 @@ import { Server as SocketIOServer, Socket } from 'socket.io';
 import { prisma } from '../lib/prisma';
 import { logger } from '../utils/logger';
 import { pushToUser } from '../services/push.service';
-import { invalidateNotifUnreadCount } from '../lib/cache';
+import { invalidateNotifUnreadCount, cacheSet } from '../lib/cache';
+
+/** Redis key for a user's last shared feeling. TTL 7 days. */
+const feelingKey = (coupleId: string, userId: string) =>
+  `us:feeling:${coupleId}:${userId}`;
 
 /**
  * US Space Socket Handlers
@@ -184,12 +188,21 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
 
       logger.info(`[UsSocket] feeling from ${userId} (${userName}) in couple ${coupleId}`);
 
-      io.to(`couple:${coupleId}`).except(socket.id).emit('us:feeling', {
+      const feelingPayload = {
         feeling: payload.feeling,
         note: payload.note,
         at: payload.at,
         from: userName || 'Your partner',
-      });
+      };
+
+      // Persist so the partner can fetch it on any fresh login (7-day TTL)
+      cacheSet(
+        feelingKey(coupleId, userId),
+        JSON.stringify(feelingPayload),
+        7 * 24 * 60 * 60,
+      ).catch(() => {});
+
+      io.to(`couple:${coupleId}`).except(socket.id).emit('us:feeling', feelingPayload);
 
       const partnerId = await findPartnerId(userId, coupleId);
       if (partnerId) {
