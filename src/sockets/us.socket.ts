@@ -89,7 +89,7 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
   // ── us:nudge ──────────────────────────────────────────────────────────
   socket.on(
     'us:nudge',
-    async (payload: { kind: string; message: string; at: string; date?: string; rawDate?: string; activity?: string }) => {
+    async (payload: { kind: string; message: string; at: string; date?: string; rawDate?: string; activity?: string; time?: string; note?: string }) => {
       if (!userId || !coupleId) return;
 
       logger.info(`[UsSocket] nudge(${payload.kind}) from ${userId} (${userName}) in couple ${coupleId}`);
@@ -105,6 +105,8 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
         date: payload.date,
         rawDate: payload.rawDate,
         activity: payload.activity,
+        time: payload.time,
+        note: payload.note,
       });
 
       // 2. Save in-app notification & set push title based on kind.
@@ -121,15 +123,27 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
         });
         pushTitle = `${senderName} sent you a hug 🤗`;
 
+      } else if (payload.kind === 'kiss') {
+        await saveUsNotification({
+          coupleId,
+          senderUserId: userId,
+          subtype: 'us_hug',
+          title: `${senderName} sent you a kiss 💋`,
+          message: 'Sending love your way 💋',
+        });
+        pushTitle = `${senderName} sent you a kiss 💋`;
+
       } else if (payload.kind === 'date_request') {
         const actLabel = payload.activity ? payload.activity : 'a date';
+        const timeLabel = payload.time ? ` at ${payload.time}` : '';
+        const dateMsg = payload.date ? `Wants to go out on ${payload.date}${timeLabel} ✨` : 'Wants to plan something special ✨';
         await saveUsNotification({
           coupleId,
           senderUserId: userId,
           subtype: 'us_date_plan',
           title: `📅 Date request · ${actLabel}`,
-          message: payload.date ? `Wants to go out on ${payload.date} ✨` : 'Wants to plan something special ✨',
-          extraData: { date: payload.date, rawDate: payload.rawDate, activity: payload.activity, kind: 'date_request' },
+          message: payload.note ? `${dateMsg} — "${payload.note}"` : dateMsg,
+          extraData: { date: payload.date, rawDate: payload.rawDate, activity: payload.activity, time: payload.time, note: payload.note, kind: 'date_request' },
         });
         pushTitle = `${senderName} wants to plan ${actLabel} 📅`;
 
