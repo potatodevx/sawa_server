@@ -38,7 +38,7 @@ const feelingKey = (coupleId: string, userId: string) =>
 async function saveUsNotification(params: {
   coupleId: string;
   senderUserId: string;
-  subtype: 'us_love' | 'us_hug' | 'us_date_plan';
+  subtype: 'us_love' | 'us_hug' | 'us_kiss' | 'us_date_plan';
   title: string;
   message: string;
   extraData?: Record<string, unknown>;
@@ -118,7 +118,7 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
           coupleId,
           senderUserId: userId,
           subtype: 'us_hug',
-          title: `${senderName} sent you a hug 🤗`,
+          title: `${senderName} sent you a hug`,
           message: 'Warm hug heading your way',
         });
         pushTitle = `${senderName} sent you a hug 🤗`;
@@ -127,9 +127,9 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
         await saveUsNotification({
           coupleId,
           senderUserId: userId,
-          subtype: 'us_hug',
-          title: `${senderName} sent you a kiss 💋`,
-          message: 'Sending love your way 💋',
+          subtype: 'us_kiss',
+          title: `${senderName} sent you a kiss`,
+          message: 'A sweet kiss from your partner',
         });
         pushTitle = `${senderName} sent you a kiss 💋`;
 
@@ -141,8 +141,8 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
           coupleId,
           senderUserId: userId,
           subtype: 'us_date_plan',
-          title: `📅 Date request · ${actLabel}`,
-          message: payload.note ? `${dateMsg} — "${payload.note}"` : dateMsg,
+          title: `Date request · ${actLabel}`,
+          message: payload.note ? `${dateMsg.replace(' ✨', '')} — "${payload.note}"` : dateMsg.replace(' ✨', ''),
           extraData: { date: payload.date, rawDate: payload.rawDate, activity: payload.activity, time: payload.time, note: payload.note, kind: 'date_request' },
         });
         pushTitle = `${senderName} wants to plan ${actLabel} 📅`;
