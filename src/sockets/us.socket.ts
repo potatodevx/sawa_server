@@ -85,7 +85,7 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
   // ── us:nudge ──────────────────────────────────────────────────────────
   socket.on(
     'us:nudge',
-    async (payload: { kind: string; message: string; at: string; date?: string; activity?: string }) => {
+    async (payload: { kind: string; message: string; at: string; date?: string; rawDate?: string; activity?: string }) => {
       if (!userId || !coupleId) return;
 
       logger.info(`[UsSocket] nudge(${payload.kind}) from ${userId} (${userName}) in couple ${coupleId}`);
@@ -99,6 +99,7 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
         at: payload.at,
         from: senderName,
         date: payload.date,
+        rawDate: payload.rawDate,
         activity: payload.activity,
       });
 
@@ -121,7 +122,7 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
           subtype: 'us_date_plan',
           title: `${senderName} planned a date 📅`,
           message: payload.message || 'A date has been planned for you two!',
-          extraData: { date: payload.date, activity: payload.activity },
+          extraData: { date: payload.date, rawDate: payload.rawDate, activity: payload.activity },
         });
       }
 
