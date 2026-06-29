@@ -107,11 +107,11 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
         activity: payload.activity,
       });
 
-      // 2. Save in-app notification.
-      const isHug = payload.kind === 'hug';
-      const isDatePlan = payload.kind === 'date_plan';
+      // 2. Save in-app notification & set push title based on kind.
+      const partnerId = await findPartnerId(userId, coupleId);
+      let pushTitle = `${senderName} sent you a nudge 💛`;
 
-      if (isHug) {
+      if (payload.kind === 'hug') {
         await saveUsNotification({
           coupleId,
           senderUserId: userId,
@@ -119,7 +119,45 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
           title: `${senderName} sent you a hug 🤗`,
           message: payload.message || 'Sending you a big warm hug!',
         });
-      } else if (isDatePlan) {
+        pushTitle = `${senderName} sent you a hug 🤗`;
+
+      } else if (payload.kind === 'date_request') {
+        // Save notification for the partner (receiver)
+        await saveUsNotification({
+          coupleId,
+          senderUserId: userId,
+          subtype: 'us_date_plan',
+          title: `${senderName} wants to plan a date 📅`,
+          message: payload.message || `${senderName} sent you a date request!`,
+          extraData: { date: payload.date, rawDate: payload.rawDate, activity: payload.activity, kind: 'date_request' },
+        });
+        pushTitle = `${senderName} wants to plan a date 📅`;
+
+      } else if (payload.kind === 'date_accept') {
+        // Save notification for the original requester (sender of this event)
+        await saveUsNotification({
+          coupleId,
+          senderUserId: userId,
+          subtype: 'us_date_plan',
+          title: `${senderName} accepted your date request 🎉`,
+          message: payload.message || `${senderName} accepted! Get ready for ${payload.activity}.`,
+          extraData: { date: payload.date, rawDate: payload.rawDate, activity: payload.activity, kind: 'date_accept' },
+        });
+        pushTitle = `${senderName} accepted your date! 🎉`;
+
+      } else if (payload.kind === 'date_reject') {
+        await saveUsNotification({
+          coupleId,
+          senderUserId: userId,
+          subtype: 'us_date_plan',
+          title: `${senderName} declined the date request`,
+          message: payload.message || `${senderName} couldn't make it this time.`,
+          extraData: { kind: 'date_reject' },
+        });
+        pushTitle = `${senderName} declined the date request`;
+
+      } else if (payload.kind === 'date_plan') {
+        // Legacy fallback
         await saveUsNotification({
           coupleId,
           senderUserId: userId,
@@ -131,10 +169,9 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
       }
 
       // 3. Push notification — only to the partner device.
-      const partnerId = await findPartnerId(userId, coupleId);
       if (partnerId) {
         pushToUser(partnerId, {
-          title: `${senderName} sent you a nudge 💛`,
+          title: pushTitle,
           body: payload.message,
           data: {
             type: 'us_nudge',
