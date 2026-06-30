@@ -198,4 +198,21 @@ router.delete('/my-feeling', authenticate, async (req: Request, res: Response): 
   }
 });
 
+/**
+ * POST /api/v1/us/admin-clear-feeling
+ * Admin-only: clears any user's feeling by coupleId + userId.
+ * Requires ?secret=SAWA_ADMIN_2026
+ */
+router.post('/admin-clear-feeling', async (req: Request, res: Response): Promise<void> => {
+  if (req.query.secret !== 'SAWA_ADMIN_2026') { res.status(403).json({ success: false }); return; }
+  const { coupleId, userId } = req.body as { coupleId?: string; userId?: string };
+  if (!coupleId || !userId) { res.status(400).json({ success: false, error: 'coupleId and userId required' }); return; }
+  try {
+    await cacheInvalidate(`us:feeling:${coupleId}:${userId}`);
+    res.json({ success: true, deleted: `us:feeling:${coupleId}:${userId}` });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 export default router;
