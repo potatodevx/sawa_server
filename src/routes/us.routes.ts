@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { authenticate } from '../middleware/authenticate';
-import { cacheGet, cacheSet } from '../lib/cache';
+import { cacheGet, cacheSet, cacheInvalidate } from '../lib/cache';
 import { prisma } from '../lib/prisma';
 import { logger } from '../utils/logger';
 
@@ -179,6 +179,22 @@ router.delete('/planned-dates/:rawDate', authenticate, async (req: Request, res:
   } catch (err: any) {
     logger.warn(`[UsRoutes] planned-dates DELETE error: ${err.message}`);
     res.status(500).json({ success: false });
+  }
+});
+
+/**
+ * DELETE /api/v1/us/my-feeling
+ * Clears the authenticated user's feeling from Redis (for testing/reset).
+ */
+router.delete('/my-feeling', authenticate, async (req: Request, res: Response): Promise<void> => {
+  const coupleId = req.user?.coupleId;
+  const myUserId = req.user?.userId;
+  if (!coupleId || !myUserId) { res.status(400).json({ success: false, error: 'Missing couple context' }); return; }
+  try {
+    await cacheInvalidate(`us:feeling:${coupleId}:${myUserId}`);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
