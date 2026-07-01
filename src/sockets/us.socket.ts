@@ -72,6 +72,11 @@ async function saveUsNotification(params: {
   }
 }
 
+/** Returns just the first word of a name (e.g. "Kiran Bhangay" → "Kiran"). */
+function firstName(name: string): string {
+  return (name || '').split(/\s+/)[0] || name;
+}
+
 /** Look up the partner's User.id given the sender's userId + coupleId. */
 async function findPartnerId(
   senderUserId: string,
@@ -103,7 +108,7 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
 
       logger.info(`[UsSocket] nudge(${payload.kind}) from ${userId} (${userName}) in couple ${coupleId}`);
 
-      const senderName = userName || 'Your partner';
+      const senderName = firstName(userName || 'Your partner');
 
       // 1. Real-time relay — partner's socket only (exclude sender).
       io.to(`couple:${coupleId}`).except(socket.id).emit('us:nudge', {
@@ -262,7 +267,7 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
 
     logger.info(`[UsSocket] love from ${userId} (${userName}) in couple ${coupleId}`);
 
-    const senderName = payload.from || userName || 'Your partner';
+    const senderName = firstName(payload.from || userName || 'Your partner');
 
     io.to(`couple:${coupleId}`).except(socket.id).emit('us:love', {
       from: senderName,
@@ -297,11 +302,13 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
 
       logger.info(`[UsSocket] feeling from ${userId} (${userName}) in couple ${coupleId}`);
 
+      const senderFirstName = firstName(userName || 'Your partner');
+
       const feelingPayload = {
         feeling: payload.feeling,
         note: payload.note,
         at: payload.at,
-        from: userName || 'Your partner',
+        from: senderFirstName,
       };
 
       // Persist so the partner can fetch it on any fresh login (7-day TTL)
@@ -317,7 +324,7 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
       if (partnerId) {
         const feelingLabel = payload.feeling || 'something';
         pushToUser(partnerId, {
-          title: `${userName || 'Your partner'} shared how they feel`,
+          title: `${senderFirstName} shared how they feel`,
           body: payload.note?.trim()
             ? `"${payload.note.trim()}"`
             : `They're feeling ${feelingLabel} right now`,
