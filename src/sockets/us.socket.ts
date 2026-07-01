@@ -38,7 +38,16 @@ const feelingKey = (coupleId: string, userId: string) =>
 async function saveUsNotification(params: {
   coupleId: string;
   senderUserId: string;
-  subtype: 'us_love' | 'us_hug' | 'us_kiss' | 'us_date_plan';
+  subtype:
+    | 'us_love'
+    | 'us_hug'
+    | 'us_kiss'
+    | 'us_date_plan'
+    | 'us_thinking'
+    | 'us_missyou'
+    | 'us_cheerup'
+    | 'us_here'
+    | 'us_appreciate';
   title: string;
   message: string;
   extraData?: Record<string, unknown>;
@@ -175,10 +184,60 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
           coupleId,
           senderUserId: userId,
           subtype: 'us_date_plan',
-          title: `${senderName} planned a date 📅`,
+          title: `${senderName} planned a date`,
           message: payload.message || 'A date has been planned for you two!',
           extraData: { date: payload.date, rawDate: payload.rawDate, activity: payload.activity },
         });
+
+      } else if (payload.kind === 'thinking') {
+        await saveUsNotification({
+          coupleId,
+          senderUserId: userId,
+          subtype: 'us_thinking',
+          title: `${senderName} is thinking of you`,
+          message: 'You crossed their mind right now',
+        });
+        pushTitle = `${senderName} is thinking of you`;
+
+      } else if (payload.kind === 'missyou') {
+        await saveUsNotification({
+          coupleId,
+          senderUserId: userId,
+          subtype: 'us_missyou',
+          title: `${senderName} misses you`,
+          message: 'They wish you were here',
+        });
+        pushTitle = `${senderName} misses you`;
+
+      } else if (payload.kind === 'cheerup') {
+        await saveUsNotification({
+          coupleId,
+          senderUserId: userId,
+          subtype: 'us_cheerup',
+          title: `${senderName} is cheering you up`,
+          message: 'A little boost from your partner',
+        });
+        pushTitle = `${senderName} is cheering you up`;
+
+      } else if (payload.kind === 'here') {
+        await saveUsNotification({
+          coupleId,
+          senderUserId: userId,
+          subtype: 'us_here',
+          title: `${senderName} is here for you`,
+          message: 'You have their full support',
+        });
+        pushTitle = `${senderName} is here for you`;
+
+      } else if (payload.kind === 'appreciate') {
+        await saveUsNotification({
+          coupleId,
+          senderUserId: userId,
+          subtype: 'us_appreciate',
+          title: `${senderName} appreciates you`,
+          message: 'They are grateful to have you',
+        });
+        pushTitle = `${senderName} appreciates you`;
       }
 
       // 3. Push notification — only to the partner device.
