@@ -7,6 +7,117 @@ import { env } from './config/env';
 import { errorHandler } from './middleware/errorHandler';
 import apiRouter from './routes/index';
 
+// ─── Deep-Link / Store Configuration ──────────────────────────────────────────
+// These identifiers power the /share/* redirect pages and the App Links /
+// Universal Links association files (/.well-known/*). Keep them in sync with the
+// mobile app (android applicationId, iOS bundle id / team id / App Store id).
+const APP_SCHEME = 'sawa';
+const ANDROID_PKG = 'com.sawa.couplesapp';
+const IOS_APP_ID = '6760969098'; // numeric App Store id (apps.apple.com/app/id...)
+const IOS_BUNDLE_ID = 'com.sawa.application';
+const IOS_TEAM_ID = '8D95PWJ95R';
+const PLAY_STORE_URL = `https://play.google.com/store/apps/details?id=${ANDROID_PKG}`;
+const APP_STORE_URL = `https://apps.apple.com/app/id${IOS_APP_ID}`;
+
+// SHA-256 signing certificate fingerprints that are allowed to open App Links.
+// - debug: the local debug.keystore (dev / adb installs)
+// - release: sawa-release.keystore (the upload/APK-distributed build)
+// NOTE: if the app is distributed via the Play Store, Google re-signs it with the
+// "Play App Signing" key — add that SHA-256 (Play Console → App integrity) here too.
+const ANDROID_SHA256_FINGERPRINTS = [
+  'FA:C6:17:45:DC:09:03:78:6F:B9:ED:E6:2A:96:2B:39:9F:73:48:F0:BB:6F:89:9B:83:32:66:75:91:03:3B:9C',
+  '65:6D:E0:45:54:C0:0B:F7:26:3F:0A:16:A9:1B:C3:4A:C6:ED:CD:DF:C6:88:FE:AE:B9:FA:36:D8:D4:F5:59:BD',
+];
+
+const escapeHtml = (s: string): string =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+// These are public redirect/marketing pages that must run a small inline script
+// to bounce the visitor to the app or store. Helmet's default CSP blocks inline
+// scripts, so relax it to allow inline execution on these routes only.
+const sendRedirectHtml = (res: Response, html: string): void => {
+  res.removeHeader('Content-Security-Policy');
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:",
+  );
+  res.setHeader('Content-Type', 'text/html');
+  res.send(html);
+};
+
+/**
+ * Builds a "smart" redirect HTML page. When the app is installed AND the platform
+ * verified the App Link / Universal Link, the OS opens the app directly and this
+ * page never renders. When it does render (app not installed, or link pasted into
+ * a browser) it tries the custom scheme, then falls back to the correct store.
+ */
+const renderSharePage = (opts: {
+  title: string;
+  description: string;
+  scheme: string; // e.g. sawa://community/123
+  emoji?: string;
+}): string => {
+  const { title, description, scheme } = opts;
+  const emoji = opts.emoji || '💛';
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(title)}</title>
+  <meta property="og:title"       content="${escapeHtml(title)}" />
+  <meta property="og:description" content="${escapeHtml(description)}" />
+  <meta property="og:type"        content="website" />
+  <!-- iOS Smart App Banner + Universal Link hint -->
+  <meta name="apple-itunes-app"   content="app-id=${IOS_APP_ID}, app-argument=${escapeHtml(scheme)}" />
+  <style>
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+         background:#FFFDF8;display:flex;flex-direction:column;align-items:center;
+         justify-content:center;min-height:100vh;margin:0;padding:24px;box-sizing:border-box;text-align:center;}
+    h1{color:#1C253B;font-size:22px;margin-bottom:8px;}
+    p{color:#7A8094;font-size:15px;margin-bottom:28px;max-width:340px;}
+    .btn{display:inline-block;background:#1C6B4A;color:#fff;border-radius:24px;
+         padding:14px 36px;font-size:17px;font-weight:600;text-decoration:none;margin:8px;}
+    .store{color:#1C6B4A;font-size:14px;margin-top:16px;text-decoration:none;}
+  </style>
+</head>
+<body>
+  <h1>${emoji} ${escapeHtml(title)}</h1>
+  <p>${escapeHtml(description)}</p>
+  <a class="btn" id="openBtn" href="${escapeHtml(scheme)}">Open in SAWA</a>
+  <a class="store" id="storeLink" href="${APP_STORE_URL}">Don't have the app? Get SAWA</a>
+
+  <script>
+    (function () {
+      var scheme = ${JSON.stringify(scheme)};
+      var playStore = ${JSON.stringify(PLAY_STORE_URL)};
+      var appStore = ${JSON.stringify(APP_STORE_URL)};
+      var ua = navigator.userAgent || navigator.vendor || '';
+      var isAndroid = /android/i.test(ua);
+      var isIOS = /iPad|iPhone|iPod/.test(ua) ||
+                  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      var store = isAndroid ? playStore : (isIOS ? appStore : null);
+      if (store) { document.getElementById('storeLink').href = store; }
+
+      // Try to open the installed app via the custom scheme.
+      var now = Date.now();
+      window.location.href = scheme;
+
+      // If we're still here after 1.5s, the app isn't installed → go to the store.
+      // (If the app opened, the page is backgrounded and this timer is throttled.)
+      if (store) {
+        setTimeout(function () {
+          if (Date.now() - now < 2500 && !document.hidden) {
+            window.location.href = store;
+          }
+        }, 1500);
+      }
+    })();
+  </script>
+</body>
+</html>`;
+};
+
 export const createApp = (): Application => {
   const app = express();
 
@@ -76,17 +187,49 @@ export const createApp = (): Application => {
     });
   });
 
+  // ─── App Links / Universal Links Association Files ──────────────────────────
+  // Android App Links: proves this domain is owned by the app, so verified
+  // https://<host>/share/* links open the app directly (no browser bounce).
+  app.get('/.well-known/assetlinks.json', (_req: Request, res: Response) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.json([
+      {
+        relation: ['delegate_permission/common.handle_all_urls'],
+        target: {
+          namespace: 'android_app',
+          package_name: ANDROID_PKG,
+          sha256_cert_fingerprints: ANDROID_SHA256_FINGERPRINTS,
+        },
+      },
+    ]);
+  });
+
+  // iOS Universal Links: must be served at the site root with no file extension
+  // and Content-Type application/json. Requires the Associated Domains
+  // capability (applinks:sawaserver-backend.up.railway.app) in the iOS app.
+  const appleAppSiteAssociation = {
+    applinks: {
+      apps: [],
+      details: [
+        {
+          appID: `${IOS_TEAM_ID}.${IOS_BUNDLE_ID}`,
+          paths: ['/share/*', '/app'],
+        },
+      ],
+    },
+  };
+  const sendAASA = (_req: Request, res: Response) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.json(appleAppSiteAssociation);
+  };
+  app.get('/.well-known/apple-app-site-association', sendAASA);
+  app.get('/apple-app-site-association', sendAASA);
+
   // ─── Share Deep-Link Redirect Pages ─────────────────────────────────────────
-  // /share/community/:id — smart link: opens app if installed, store otherwise.
+  // /share/community/:id — opens app if installed, store otherwise.
   app.get('/share/community/:id', async (req: Request, res: Response) => {
     const { id } = req.params;
-    const appScheme   = `sawa://community/${id}`;
-    const androidPkg  = 'com.sawa';
-    const iosAppId    = '6745446429'; // App Store numeric ID for SAWA
-    const playStore   = `https://play.google.com/store/apps/details?id=${androidPkg}`;
-    const appStore    = `https://apps.apple.com/app/id${iosAppId}`;
 
-    // Fetch community name for OG preview (best-effort)
     let communityName = 'a community';
     let communityCity = '';
     try {
@@ -101,45 +244,83 @@ export const createApp = (): Application => {
       }
     } catch { /* non-fatal */ }
 
-    const pageTitle   = `${communityName} — SAWA`;
-    const description = `Join ${communityName}${communityCity ? ` in ${communityCity}` : ''} on SAWA, the social circle for couples.`;
+    sendRedirectHtml(
+      res,
+      renderSharePage({
+        title: `${communityName} — SAWA`,
+        description: `Join ${communityName}${communityCity ? ` in ${communityCity}` : ''} on SAWA, the social circle for couples.`,
+        scheme: `${APP_SCHEME}://community/${id}`,
+        emoji: '🌿',
+      }),
+    );
+  });
 
-    res.setHeader('Content-Type', 'text/html');
-    res.send(`<!DOCTYPE html>
+  // /share/couple/:id — opens the couple's profile in the app, store otherwise.
+  app.get('/share/couple/:id', async (req: Request, res: Response) => {
+    const { id } = req.params;
+
+    let coupleName = 'a couple';
+    try {
+      const { prisma } = await import('./lib/prisma');
+      // The shared link carries the business `coupleId`, but fall back to the
+      // primary `id` just in case an internal id was used.
+      const couple = await prisma.couple.findFirst({
+        where: { OR: [{ coupleId: id }, { id }] },
+        select: { profileName: true },
+      });
+      if (couple?.profileName) coupleName = couple.profileName;
+    } catch { /* non-fatal */ }
+
+    sendRedirectHtml(
+      res,
+      renderSharePage({
+        title: `${coupleName} on SAWA`,
+        description: `Check out ${coupleName} on SAWA, the social circle for couples.`,
+        scheme: `${APP_SCHEME}://couple/${id}`,
+        emoji: '💛',
+      }),
+    );
+  });
+
+  // /app — plain "get the app" smart link (used by Settings → Share Sawa).
+  // Detects the visitor's platform and forwards to the correct store.
+  app.get('/app', (_req: Request, res: Response) => {
+    sendRedirectHtml(res, `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${pageTitle}</title>
-  <!-- Open Graph (WhatsApp / iMessage preview) -->
-  <meta property="og:title"       content="${pageTitle}" />
-  <meta property="og:description" content="${description}" />
+  <title>Get SAWA</title>
+  <meta property="og:title"       content="SAWA — a social circle for couples" />
+  <meta property="og:description" content="A warm, family-friendly space for couples to connect with other couples." />
   <meta property="og:type"        content="website" />
-  <!-- Apple Universal Links / Android App Links (configure AASA / assetlinks later) -->
-  <meta name="apple-itunes-app"   content="app-id=${iosAppId}, app-argument=${appScheme}" />
+  <meta name="apple-itunes-app"   content="app-id=${IOS_APP_ID}" />
   <style>
-    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
          background:#FFFDF8;display:flex;flex-direction:column;align-items:center;
          justify-content:center;min-height:100vh;margin:0;padding:24px;box-sizing:border-box;text-align:center;}
-    h1{color:#1C253B;font-size:22px;margin-bottom:8px;}
-    p{color:#7A8094;font-size:15px;margin-bottom:32px;}
+    h1{color:#1C253B;font-size:24px;margin-bottom:8px;}
+    p{color:#7A8094;font-size:15px;margin-bottom:28px;max-width:340px;}
     .btn{display:inline-block;background:#1C6B4A;color:#fff;border-radius:24px;
          padding:14px 36px;font-size:17px;font-weight:600;text-decoration:none;margin:8px;}
   </style>
 </head>
 <body>
-  <h1>🌿 ${communityName}</h1>
-  <p>${description}</p>
-  <a class="btn" href="${appScheme}">Open in SAWA</a>
-
+  <h1>💛 Get SAWA</h1>
+  <p>A warm, family-friendly space for couples to connect with other couples.</p>
+  <a class="btn" id="storeBtn" href="${APP_STORE_URL}">Download SAWA</a>
   <script>
-    // Try to open the app. After 2 s, fall back to the store based on platform.
-    window.location.href = '${appScheme}';
-    var isAndroid = /android/i.test(navigator.userAgent);
-    var store = isAndroid ? '${playStore}' : '${appStore}';
-    setTimeout(function(){
-      window.location.href = store;
-    }, 2000);
+    (function () {
+      var playStore = ${JSON.stringify(PLAY_STORE_URL)};
+      var appStore = ${JSON.stringify(APP_STORE_URL)};
+      var ua = navigator.userAgent || navigator.vendor || '';
+      var isAndroid = /android/i.test(ua);
+      var isIOS = /iPad|iPhone|iPod/.test(ua) ||
+                  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      if (isAndroid) { window.location.href = playStore; }
+      else if (isIOS) { window.location.href = appStore; }
+      else { document.getElementById('storeBtn').setAttribute('href', appStore); }
+    })();
   </script>
 </body>
 </html>`);
