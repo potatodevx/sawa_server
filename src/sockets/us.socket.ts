@@ -245,7 +245,16 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
         pushTitle = `${senderName} appreciates you`;
       }
 
-      // 3. Push notification — only to the partner device.
+      // 3. In-app notification badge: tell the partner's Notifications screen to
+      //    re-fetch immediately. Without this the date request sits in the DB but
+      //    the partner's list never refreshes on its own (no socket push is sent
+      //    by saveUsNotification itself).
+      io.to(`couple:${coupleId}`).except(socket.id).emit('notification:new', {
+        type: 'us_nudge',
+        kind: payload.kind,
+      });
+
+      // 4. Push notification — only to the partner device.
       if (partnerId) {
         pushToUser(partnerId, {
           title: pushTitle,
