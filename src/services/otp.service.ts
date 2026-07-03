@@ -55,12 +55,13 @@ export class OtpService {
       data: { phone, coupleId, otpCode: code, expiresAt },
     });
 
-    // Google SMS Retriever API format (must be < 140 bytes):
-    //   Line 1: starts with "<#> " followed by the message
-    //   Last line: the 11-character app hash, alone on its own line
-    // Without this exact format Android will NOT intercept the SMS.
+    // SMS format for Android OTP auto-detect (must be < 140 bytes):
+    //   - Must END with the 11-character app hash (SMS Retriever API requirement)
+    //   - Must NOT start with "<#>" — on MIUI/Poco that prefix suppresses the
+    //     keyboard OTP suggestion bar that lets users tap-to-fill the code
+    //   - Keep the message human-readable so Android TextClassifier picks up the OTP
     const body = ANDROID_APP_HASH
-      ? `<#> [SAWA] Your code: ${code}. Valid ${OTP_EXPIRES_IN_MINUTES} min.\n${ANDROID_APP_HASH}`
+      ? `[SAWA] Your verification code is: ${code}. Valid for ${OTP_EXPIRES_IN_MINUTES} minutes.\n${ANDROID_APP_HASH}`
       : (customMessage
           ? customMessage.replace('{{code}}', code)
           : `[SAWA] Your verification code is: ${code}. Valid for ${OTP_EXPIRES_IN_MINUTES} minutes.`);
