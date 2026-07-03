@@ -104,7 +104,7 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
   // ── us:nudge ──────────────────────────────────────────────────────────
   socket.on(
     'us:nudge',
-    async (payload: { kind: string; message: string; at: string; date?: string; rawDate?: string; activity?: string; time?: string; note?: string }) => {
+    async (payload: { kind: string; message: string; at: string; date?: string; rawDate?: string; activity?: string; time?: string; note?: string; planBy?: string }) => {
       if (!userId || !coupleId) return;
 
       logger.info(`[UsSocket] nudge(${payload.kind}) from ${userId} (${userName}) in couple ${coupleId}`);
@@ -117,6 +117,9 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
         message: payload.message,
         at: payload.at,
         from: senderName,
+        // Name of whoever originally PLANNED the date — survives the relay so the
+        // partner's calendar always shows "Planned by <real name>", not "Partner".
+        planBy: payload.planBy,
         date: payload.date,
         rawDate: payload.rawDate,
         activity: payload.activity,
@@ -158,7 +161,7 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
           subtype: 'us_date_plan',
           title: `Date request · ${actLabel}`,
           message: payload.note ? `${dateMsg.replace(' ✨', '')} — "${payload.note}"` : dateMsg.replace(' ✨', ''),
-          extraData: { date: payload.date, rawDate: payload.rawDate, activity: payload.activity, time: payload.time, note: payload.note, kind: 'date_request' },
+          extraData: { date: payload.date, rawDate: payload.rawDate, activity: payload.activity, time: payload.time, note: payload.note, kind: 'date_request', planBy: payload.planBy || senderName },
         });
         pushTitle = `${senderName} wants to plan ${actLabel} 📅`;
 

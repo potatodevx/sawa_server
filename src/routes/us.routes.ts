@@ -131,7 +131,7 @@ router.post('/planned-dates', authenticate, async (req: Request, res: Response):
     const key = `us:planned_dates:${coupleId}`;
     const raw = await cacheGet(key);
     const prev: any[] = raw ? JSON.parse(raw) : [];
-    const entry = { activity, date: date ?? rawDate, rawDate, from: from ?? 'Partner', time, note };
+    const entry = { activity, date: date ?? rawDate, rawDate, from: from || 'Your partner', time, note };
     const updated = [...prev.filter((p: any) => p.rawDate !== rawDate), entry];
     await cacheSet(key, JSON.stringify(updated), PLANNED_DATES_TTL);
     res.json({ success: true });
