@@ -464,8 +464,10 @@ export class CoupleService {
   // Lightweight public profile — skips communityMembers and answers.
   // Used by getCoupleById (viewing another couple's profile card).
   async getCoupleSummary(coupleId: string): Promise<any | null> {
-    const couple = await prisma.couple.findUnique({
-      where: { coupleId },
+    // Resolve by either the business coupleId OR the internal cuid id, so a
+    // shared link works regardless of which id it carries.
+    const couple = await prisma.couple.findFirst({
+      where: { OR: [{ coupleId }, { id: coupleId }] },
       include: {
         partner1: { select: { id: true, name: true, email: true, dob: true } },
         partner2: { select: { id: true, name: true, email: true, dob: true } },
