@@ -144,7 +144,7 @@ export const registerChatHandlers = (io: SocketIOServer, socket: Socket): void =
                    title: `New Message from ${me?.profileName || 'Couple'}`,
                    message: `You have new messages from ${me?.profileName || 'Couple'}`,
                    groupKey: `message:match:${chatId}:${socket.coupleId}`,
-                   data: { matchId: chatId, coupleName: me?.profileName },
+                   data: { matchId: chatId, coupleName: me?.profileName, navigate: 'PrivateChatThread' },
                  });
               }
             } else if (chatType === 'group') {
@@ -173,6 +173,7 @@ export const registerChatHandlers = (io: SocketIOServer, socket: Socket): void =
                          communityId: community.id,
                          communityName: community.name,
                          chatOnly: true,
+                         navigate: 'GroupChat',
                        },
                      }),
                    ),

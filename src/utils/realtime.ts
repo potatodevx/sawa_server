@@ -1,5 +1,13 @@
 import { pushToCouple } from '../services/push.service';
 
+/** Map notification type → the screen name the app should open on tap. */
+function deriveNavigate(type?: string, data?: Record<string, unknown>): string {
+  if (type === 'message' && data?.matchId) return 'PrivateChatThread';
+  if (type === 'message' && data?.communityId) return 'GroupChat';
+  if (type === 'community' && data?.communityId) return 'CommunityDetail';
+  return 'Notifications';
+}
+
 type RealtimeNotificationPayload = {
   notificationId?: string;
   type?: string;
@@ -34,13 +42,21 @@ export const emitRealtimeNotification = (
   // Fire-and-forget push delivery. Skips automatically when push is disabled
   // or the couple has no registered devices.
   if (payload.title || payload.message) {
+    const extraData = payload.data && typeof payload.data === 'object'
+      ? (payload.data as Record<string, unknown>)
+      : {};
+
+    // Derive a sensible default navigation target if the caller didn't set one.
+    const navigate = extraData.navigate ?? deriveNavigate(payload.type, extraData);
+
     pushToCouple(recipientCoupleId, {
       title: payload.title || 'SAWA',
       body: payload.message || '',
       data: {
         type: payload.type,
         notificationId: payload.notificationId,
-        ...(payload.data && typeof payload.data === 'object' ? (payload.data as Record<string, unknown>) : {}),
+        ...extraData,
+        navigate,
       },
       collapseKey: payload.type,
     }).catch(() => {

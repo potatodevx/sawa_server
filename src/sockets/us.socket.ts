@@ -266,7 +266,7 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
           data: {
             type: 'us_nudge',
             kind: payload.kind,
-            navigate: 'UsSpace',
+            navigate: 'Notifications',
           },
           collapseKey: 'us_nudge',
         }).catch(() => null);
@@ -304,11 +304,11 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
     const partnerId = await findPartnerId(userId, coupleId);
     if (partnerId) {
       pushToUser(partnerId, {
-        title: `${senderName} sent you love ❤️`,
-        body: 'Open the US space to see it',
-        data: { type: 'us_love', navigate: 'UsSpace' },
-        collapseKey: 'us_love',
-      }).catch(() => null);
+          title: `${senderName} sent you love ❤️`,
+          body: 'Tap to see it',
+          data: { type: 'us_love', navigate: 'Notifications' },
+          collapseKey: 'us_love',
+        }).catch(() => null);
     }
   });
 
@@ -366,7 +366,7 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
           body: payload.note?.trim()
             ? `"${payload.note.trim()}"`
             : `They're feeling ${feelingLabel} right now`,
-          data: { type: 'us_feeling', feeling: payload.feeling, navigate: 'UsSpace' },
+          data: { type: 'us_feeling', feeling: payload.feeling, navigate: 'Notifications' },
           collapseKey: 'us_feeling',
         }).catch(() => null);
       }
