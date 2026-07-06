@@ -33,8 +33,15 @@ const init = (): void => {
   if (initialised) return;
   initialised = true;
 
+  // Accept either the full service-account JSON (preferred) or, as a fallback,
+  // the three individual fields. This lets us survive Railway's occasional
+  // mangling of large multi-line env vars.
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
-  if (!raw) {
+  const projectIdEnv = process.env.FIREBASE_PROJECT_ID;
+  const clientEmailEnv = process.env.FIREBASE_CLIENT_EMAIL;
+  const privateKeyEnv = process.env.FIREBASE_PRIVATE_KEY;
+
+  if (!raw && !(projectIdEnv && clientEmailEnv && privateKeyEnv)) {
     logger.warn(
       '[Push] FIREBASE_SERVICE_ACCOUNT_JSON not set — push notifications disabled. ' +
         'In-app notifications continue to work normally.',
@@ -43,14 +50,42 @@ const init = (): void => {
   }
 
   try {
-    const serviceAccount = JSON.parse(raw);
+    let serviceAccount: Record<string, any>;
+
+    if (raw) {
+      serviceAccount = JSON.parse(raw);
+    } else {
+      serviceAccount = {
+        projectId: projectIdEnv,
+        clientEmail: clientEmailEnv,
+        privateKey: privateKeyEnv,
+      };
+    }
+
+    // CRITICAL: Railway (and most env-var UIs) store the private key with the
+    // newlines escaped as the two characters "\n". Firebase needs REAL newline
+    // characters or credential.cert() throws "Invalid PEM formatted message".
+    const pk = serviceAccount.private_key ?? serviceAccount.privateKey;
+    if (typeof pk === 'string' && pk.includes('\\n')) {
+      const fixed = pk.replace(/\\n/g, '\n');
+      if ('private_key' in serviceAccount) serviceAccount.private_key = fixed;
+      if ('privateKey' in serviceAccount) serviceAccount.privateKey = fixed;
+    }
+
     admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
+      credential: admin.credential.cert(serviceAccount as admin.ServiceAccount),
     });
     enabled = true;
-    logger.info('[Push] Firebase Admin initialised — push delivery enabled.');
+    logger.info(
+      `[Push] Firebase Admin initialised — push delivery ENABLED (project: ${
+        serviceAccount.project_id ?? serviceAccount.projectId ?? 'unknown'
+      }).`,
+    );
   } catch (err: any) {
-    logger.error(`[Push] Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON: ${err.message}`);
+    logger.error(
+      `[Push] Firebase Admin init FAILED — push disabled. Reason: ${err.message}. ` +
+        `Check FIREBASE_SERVICE_ACCOUNT_JSON is valid JSON with a correct private_key.`,
+    );
   }
 };
 

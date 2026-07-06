@@ -6,6 +6,7 @@ import compression from 'compression';
 import { env } from './config/env';
 import { errorHandler } from './middleware/errorHandler';
 import apiRouter from './routes/index';
+import { isPushEnabled } from './services/push.service';
 
 // ─── Deep-Link / Store Configuration ──────────────────────────────────────────
 // These identifiers power the /share/* redirect pages and the App Links /
@@ -174,6 +175,9 @@ export const createApp = (): Application => {
       service: 'sawa-server',
       environment: env.NODE_ENV,
       db: { type: 'postgresql (prisma)' },
+      // pushEnabled === false means FIREBASE_SERVICE_ACCOUNT_JSON is missing or
+      // invalid on this server → no push notifications will be delivered.
+      pushEnabled: isPushEnabled(),
       timestamp: new Date().toISOString(),
     });
   });
