@@ -3,7 +3,7 @@ import { prisma } from '../lib/prisma';
 import { sendSuccess } from '../utils/response';
 import { AppError } from '../utils/AppError';
 import { logger } from '../utils/logger';
-import { isPushEnabled } from '../services/push.service';
+import { isPushEnabled, pushToUser } from '../services/push.service';
 
 /**
  * GET /api/v1/users/me
@@ -120,4 +120,50 @@ export const getPushStatus = async (req: Request, res: Response): Promise<void> 
         : null,
     },
   });
+};
+
+/**
+ * POST /api/v1/users/me/test-push
+ * Sends a real push to yourself AND your partner via the same code path
+ * used by the app (pushToUser). Use to verify the server → FCM → device
+ * chain without needing a socket event.
+ */
+export const testPush = async (req: Request, res: Response): Promise<void> => {
+  if (!req.user) throw new AppError('Unauthorized', 401);
+  if (!isPushEnabled()) throw new AppError('Push not enabled on server', 503);
+
+  const user = await prisma.user.findUnique({
+    where: { id: req.user.userId },
+    select: { id: true, name: true, coupleId: true },
+  });
+  if (!user) throw new AppError('User not found', 404);
+
+  const results: Record<string, unknown> = {};
+
+  // Push to self
+  const selfResult = await pushToUser(user.id, {
+    title: 'SAWA Server Test',
+    body: 'Server → FCM path is working ✓',
+    data: { navigate: 'Notifications', source: 'test-push' },
+  });
+  results.self = selfResult;
+
+  // Push to partner
+  if (user.coupleId) {
+    const partner = await prisma.user.findFirst({
+      where: { coupleId: user.coupleId, NOT: { id: user.id } },
+      select: { id: true },
+    });
+    if (partner) {
+      const partnerResult = await pushToUser(partner.id, {
+        title: `Message from ${user.name || 'Your partner'} 💛`,
+        body: 'Server push test — tap to open',
+        data: { navigate: 'Notifications', source: 'test-push' },
+      });
+      results.partner = partnerResult;
+    }
+  }
+
+  logger.info(`[Push] test-push triggered by ${user.id}: ${JSON.stringify(results)}`);
+  sendSuccess({ res, data: { results } });
 };

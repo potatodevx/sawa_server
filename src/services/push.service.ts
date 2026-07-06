@@ -211,12 +211,14 @@ export const pushToUser = async (
 ): Promise<{ sent: number; failed: number }> => {
   if (!enabled) return { sent: 0, failed: 0 };
 
+  // findUnique only accepts the unique key — extra conditions like
+  // pushToken: { not: null } are not valid there. Check null after fetch.
   const user = await prisma.user.findUnique({
-    where: { id: userId, pushToken: { not: null } },
+    where: { id: userId },
     select: { id: true, pushToken: true },
   });
 
-  const token = user?.pushToken;
+  const token = user?.pushToken ?? null;
   if (!token) {
     logger.warn(`[Push] pushToUser(${userId}): no token found — user has not registered push yet.`);
     return { sent: 0, failed: 0 };
