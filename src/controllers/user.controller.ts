@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { sendSuccess } from '../utils/response';
 import { AppError } from '../utils/AppError';
+import { logger } from '../utils/logger';
+import { isPushEnabled } from '../services/push.service';
 
 /**
  * GET /api/v1/users/me
@@ -66,5 +68,56 @@ export const registerPushToken = async (req: Request, res: Response): Promise<vo
     },
   });
 
+  logger.info(
+    `[Push] Token ${token ? 'saved' : 'cleared'} for user ${req.user.userId} (${platform || 'unknown platform'})`,
+  );
+
   sendSuccess({ res, message: 'Push token registered' });
+};
+
+/**
+ * GET /api/v1/users/me/push-status
+ * Diagnostic: returns whether this user has a push token saved + server push state.
+ * Safe to call from the app or via curl to debug push delivery.
+ */
+export const getPushStatus = async (req: Request, res: Response): Promise<void> => {
+  if (!req.user) throw new AppError('Unauthorized', 401);
+
+  const user = await prisma.user.findUnique({
+    where: { id: req.user.userId },
+    select: { id: true, pushToken: true, pushPlatform: true, coupleId: true },
+  });
+
+  if (!user) throw new AppError('User not found', 404);
+
+  // Also get partner's status so both can be checked in one call
+  let partner: { id: string; pushToken: string | null; pushPlatform: string | null } | null = null;
+  if (user.coupleId) {
+    partner = await prisma.user.findFirst({
+      where: { coupleId: user.coupleId, NOT: { id: user.id } },
+      select: { id: true, pushToken: true, pushPlatform: true },
+    }) ?? null;
+  }
+
+  sendSuccess({
+    res,
+    data: {
+      serverPushEnabled: isPushEnabled(),
+      you: {
+        userId: user.id,
+        tokenSaved: !!user.pushToken,
+        // Show only last 10 chars for security
+        tokenPreview: user.pushToken ? `...${user.pushToken.slice(-10)}` : null,
+        platform: user.pushPlatform,
+      },
+      partner: partner
+        ? {
+            userId: partner.id,
+            tokenSaved: !!partner.pushToken,
+            tokenPreview: partner.pushToken ? `...${partner.pushToken.slice(-10)}` : null,
+            platform: partner.pushPlatform,
+          }
+        : null,
+    },
+  });
 };

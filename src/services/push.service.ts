@@ -122,7 +122,12 @@ export const pushToCouple = async (
     .map((u) => u.pushToken)
     .filter((t): t is string => !!t && t.length > 0);
 
-  if (tokens.length === 0) return { sent: 0, failed: 0 };
+  if (tokens.length === 0) {
+    logger.warn(`[Push] pushToCouple(${coupleId}): no tokens found — users have not registered push yet.`);
+    return { sent: 0, failed: 0 };
+  }
+
+  logger.info(`[Push] pushToCouple(${coupleId}): sending "${payload.title}" to ${tokens.length} token(s).`);
 
   const stringData: Record<string, string> = {};
   if (payload.data) {
@@ -182,6 +187,12 @@ export const pushToCouple = async (
       }
     }
 
+    logger.info(`[Push] pushToCouple(${coupleId}): sent=${response.successCount} failed=${response.failureCount}`);
+    if (response.failureCount > 0) {
+      response.responses.forEach((r, idx) => {
+        if (!r.success) logger.warn(`[Push] Token[${idx}] failed: ${r.error?.code} — ${r.error?.message}`);
+      });
+    }
     return { sent: response.successCount, failed: response.failureCount };
   } catch (err: any) {
     logger.error(`[Push] Send failed for couple ${coupleId}: ${err.message}`);
@@ -206,7 +217,11 @@ export const pushToUser = async (
   });
 
   const token = user?.pushToken;
-  if (!token) return { sent: 0, failed: 0 };
+  if (!token) {
+    logger.warn(`[Push] pushToUser(${userId}): no token found — user has not registered push yet.`);
+    return { sent: 0, failed: 0 };
+  }
+  logger.info(`[Push] pushToUser(${userId}): sending "${payload.title}".`);
 
   const stringData: Record<string, string> = {};
   if (payload.data) {
