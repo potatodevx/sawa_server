@@ -78,23 +78,36 @@ function firstName(name: string): string {
   return (name || '').split(/\s+/)[0] || name;
 }
 
-/** Look up the partner's User.id given the sender's userId + coupleId. */
-async function findPartnerId(
+/** Look up the partner's User.id AND the sender's profile photo. */
+async function findPartnerIdAndPhoto(
   senderUserId: string,
   coupleId: string,
-): Promise<string | null> {
+): Promise<{ partnerId: string | null; senderPhoto: string | null }> {
   try {
     const couple = await prisma.couple.findUnique({
       where: { coupleId },
-      select: { partner1Id: true, partner2Id: true },
+      select: {
+        partner1Id: true,
+        partner2Id: true,
+        primaryPhoto: true,
+        photos: true,
+      },
     });
-    if (!couple) return null;
-    if (couple.partner1Id === senderUserId) return couple.partner2Id;
-    if (couple.partner2Id === senderUserId) return couple.partner1Id;
-    return null;
+    if (!couple) return { partnerId: null, senderPhoto: null };
+
+    const partnerId =
+      couple.partner1Id === senderUserId ? couple.partner2Id :
+      couple.partner2Id === senderUserId ? couple.partner1Id : null;
+
+    // Use the couple's primary photo as the sender's avatar in push notifications.
+    const senderPhoto: string | null =
+      (couple.primaryPhoto as string | null) ??
+      ((couple.photos as string[] | null)?.[0] ?? null);
+
+    return { partnerId, senderPhoto };
   } catch (err: any) {
-    logger.warn(`[UsSocket] findPartnerId failed: ${err.message}`);
-    return null;
+    logger.warn(`[UsSocket] findPartnerIdAndPhoto failed: ${err.message}`);
+    return { partnerId: null, senderPhoto: null };
   }
 }
 
@@ -128,7 +141,7 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
       });
 
       // 2. Save in-app notification & set push title based on kind.
-      const partnerId = await findPartnerId(userId, coupleId);
+      const { partnerId, senderPhoto } = await findPartnerIdAndPhoto(userId, coupleId);
       let pushTitle = `${senderName} sent you a nudge 💛`;
 
       if (payload.kind === 'hug') {
@@ -267,6 +280,7 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
             type: 'us_nudge',
             kind: payload.kind,
             navigate: 'Notifications',
+            ...(senderPhoto ? { senderPhoto } : {}),  // couple profile photo for largeIcon
           },
           collapseKey: 'us_nudge',
         }).catch(() => null);
@@ -301,14 +315,14 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
       type: 'us_love',
     });
 
-    const partnerId = await findPartnerId(userId, coupleId);
-    if (partnerId) {
-      pushToUser(partnerId, {
-          title: `${senderName} sent you love ❤️`,
-          body: 'Tap to see it',
-          data: { type: 'us_love', navigate: 'Notifications' },
-          collapseKey: 'us_love',
-        }).catch(() => null);
+    const { partnerId: lovePartnerId, senderPhoto: loveSenderPhoto } = await findPartnerIdAndPhoto(userId, coupleId);
+    if (lovePartnerId) {
+      pushToUser(lovePartnerId, {
+        title: `${senderName} sent you love ❤️`,
+        body: 'Tap to see it',
+        data: { type: 'us_love', navigate: 'Notifications', ...(loveSenderPhoto ? { senderPhoto: loveSenderPhoto } : {}) },
+        collapseKey: 'us_love',
+      }).catch(() => null);
     }
   });
 
@@ -359,14 +373,19 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
         feeling: payload.feeling,
       });
 
-      const partnerId = await findPartnerId(userId, coupleId);
-      if (partnerId) {
-        pushToUser(partnerId, {
+      const { partnerId: feelPartnerId, senderPhoto: feelSenderPhoto } = await findPartnerIdAndPhoto(userId, coupleId);
+      if (feelPartnerId) {
+        pushToUser(feelPartnerId, {
           title: `${senderFirstName} shared how they feel`,
           body: payload.note?.trim()
             ? `"${payload.note.trim()}"`
             : `They're feeling ${feelingLabel} right now`,
-          data: { type: 'us_feeling', feeling: payload.feeling, navigate: 'Notifications' },
+          data: {
+            type: 'us_feeling',
+            feeling: payload.feeling,
+            navigate: 'Notifications',
+            ...(feelSenderPhoto ? { senderPhoto: feelSenderPhoto } : {}),
+          },
           collapseKey: 'us_feeling',
         }).catch(() => null);
       }

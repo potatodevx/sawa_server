@@ -144,7 +144,7 @@ export const registerChatHandlers = (io: SocketIOServer, socket: Socket): void =
                    title: `New Message from ${me?.profileName || 'Couple'}`,
                    message: `You have new messages from ${me?.profileName || 'Couple'}`,
                    groupKey: `message:match:${chatId}:${socket.coupleId}`,
-                   data: { matchId: chatId, coupleName: me?.profileName, navigate: 'PrivateChatThread' },
+                   data: { matchId: chatId, coupleName: me?.profileName, navigate: 'PrivateChatThread', ...(me?.primaryPhoto ? { senderPhoto: me.primaryPhoto } : {}) },
                  });
               }
             } else if (chatType === 'group') {
