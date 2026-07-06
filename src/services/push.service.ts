@@ -137,27 +137,30 @@ export const pushToCouple = async (
     }
   }
 
+  // Android: data-only message — the app's background handler (notifee) renders
+  // the notification so we can show the full-color SAWA logo as the large icon.
+  // iOS: standard APNs alert so the OS auto-displays it (no background handler needed).
+  const dataWithText: Record<string, string> = {
+    title: payload.title,
+    body: payload.body,
+    ...stringData,
+  };
+
   try {
     const response = await admin.messaging().sendEachForMulticast({
       tokens,
-      notification: {
-        title: payload.title,
-        body: payload.body,
-      },
-      data: stringData,
+      // NO top-level notification field → prevents FCM auto-display on Android
+      // (would otherwise duplicate the notifee-rendered notification).
+      data: dataWithText,
       android: {
         priority: 'high',
         collapseKey: payload.collapseKey,
-        notification: {
-          sound: 'default',
-          channelId: 'sawa_default',
-          icon: 'ic_notification',
-          color: '#5DBE8B',
-        },
+        // No android.notification → pure data message on Android
       },
       apns: {
         payload: {
           aps: {
+            alert: { title: payload.title, body: payload.body },
             sound: 'default',
             badge: 1,
           },
@@ -235,18 +238,24 @@ export const pushToUser = async (
     }
   }
 
+  const dataWithText: Record<string, string> = {
+    title: payload.title,
+    body: payload.body,
+    ...stringData,
+  };
+
   try {
     const response = await admin.messaging().send({
       token,
-      notification: { title: payload.title, body: payload.body },
-      data: stringData,
+      // Android: data-only so the app's notifee background handler renders it
+      // with the full-color SAWA logo. iOS: APNs alert for system auto-display.
+      data: dataWithText,
       android: {
         priority: 'high',
         collapseKey: payload.collapseKey,
-        notification: { sound: 'default', channelId: 'sawa_default', icon: 'ic_notification', color: '#5DBE8B' },
       },
       apns: {
-        payload: { aps: { sound: 'default', badge: 1 } },
+        payload: { aps: { alert: { title: payload.title, body: payload.body }, sound: 'default', badge: 1 } },
       },
     });
     logger.info(`[Push] Sent to user ${userId}: ${response}`);
