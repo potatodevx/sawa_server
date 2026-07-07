@@ -11,9 +11,18 @@ const TWILIO_AUTH = process.env.TWILIO_AUTH_TOKEN;
 const TWILIO_PHONE = process.env.TWILIO_PHONE_NUMBER;
 
 // Android SMS Retriever hash — appended to SMS so Android auto-detects the OTP.
-// Set ANDROID_APP_HASH in the server env after getting the value from the app logs.
-// Debug and release builds have DIFFERENT hashes; set the production one for Play Store.
-const ANDROID_APP_HASH = process.env.ANDROID_APP_HASH || '';
+// The hash is derived from the app package name + signing certificate, so it is
+// UNIQUE per signing key. The value below is the hash for the direct-distribution
+// APK (package `com.sawa.couplesapp`, signed with `sawa-release.keystore`).
+//
+// IMPORTANT:
+//   - If the app is ever re-signed with a different keystore, this value MUST change.
+//   - Google Play App Signing re-signs the app with Google's own key, which produces
+//     a DIFFERENT hash. For a Play-distributed build, set ANDROID_APP_HASH in the env
+//     to the Play "App signing key" hash (from Play Console → App integrity).
+//   - The env var (when set) always overrides this default.
+const DEFAULT_ANDROID_APP_HASH = 'AJnYV5HCtqV';
+const ANDROID_APP_HASH = process.env.ANDROID_APP_HASH || DEFAULT_ANDROID_APP_HASH;
 
 // Twilio is required — all three credentials must be set
 const TWILIO_READY = !!(TWILIO_SID && TWILIO_AUTH && TWILIO_PHONE);

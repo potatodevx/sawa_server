@@ -2,6 +2,7 @@ import { prisma } from '../lib/prisma';
 import { AppError } from '../utils/AppError';
 import { logger } from '../utils/logger';
 import { emitRealtimeNotification } from '../utils/realtime';
+import { cityFromCoords } from '../utils/geo';
 
 export class CoupleService {
   /**
@@ -309,6 +310,15 @@ export class CoupleService {
     if (lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng)) {
       updateData.locationLatitude = lat;
       updateData.locationLongitude = lng;
+      // GPS coordinates are the single source of truth for the city label.
+      // Snap to the nearest supported city so the city always agrees with the
+      // stored coordinates (fixes city/coords mismatches like Delhi vs Goa).
+      // Only override when the fix is within range of a supported city;
+      // otherwise keep whatever readable place name the client sent.
+      const derivedCity = cityFromCoords(lat, lng);
+      if (derivedCity) {
+        updateData.locationCity = derivedCity;
+      }
     }
 
     // 1. Photos processing
