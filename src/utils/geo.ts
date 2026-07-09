@@ -61,7 +61,12 @@ export function coupleCoordinates(couple: {
     Math.abs(lat) <= 90 &&
     Math.abs(lng) <= 180
   ) {
-    return { lat, lng };
+    // Only trust coordinates that snap to one of the cities the app serves.
+    // This prevents emulator/test GPS (e.g. Mountain View, CA → ~13 900 km
+    // from Chennai) from being used in distance calculations.
+    if (cityFromCoords(lat, lng) !== null) {
+      return { lat, lng };
+    }
   }
   return cityCentroid(couple.locationCity);
 }
