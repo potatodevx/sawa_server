@@ -307,8 +307,14 @@ export class CoupleService {
     const lat = data.locationLatitude;
     const lng = data.locationLongitude;
     if (lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng)) {
-      updateData.locationLatitude = lat;
-      updateData.locationLongitude = lng;
+      // Only persist coordinates within India's service area (lat 6–38, lng 68–98).
+      // Emulator defaults like Mountain View, CA (37.4°N, 122°W) are rejected so
+      // they never cause "13 000 km away" distances in the discovery feed.
+      const inServiceArea = lat >= 6 && lat <= 38 && lng >= 68 && lng <= 98;
+      if (inServiceArea) {
+        updateData.locationLatitude = lat;
+        updateData.locationLongitude = lng;
+      }
     }
 
     // 1. Photos processing

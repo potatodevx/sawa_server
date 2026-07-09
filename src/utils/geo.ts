@@ -26,6 +26,18 @@ export function cityCentroid(city?: string | null): GeoPoint | null {
   return null;
 }
 
+/**
+ * Returns true when the coordinates fall within the approximate bounding box
+ * that covers all cities the app serves (India + Goa). This blocks emulator
+ * defaults like Mountain View, CA (37.4°N, 122°W) from being used for
+ * distance calculations.
+ *   Lat  6 – 38 °N  (Kanyakumari to Kashmir)
+ *   Lng 68 – 98 °E  (Gujarat coast to Arunachal)
+ */
+function isWithinServiceArea(lat: number, lng: number): boolean {
+  return lat >= 6 && lat <= 38 && lng >= 68 && lng <= 98;
+}
+
 export function coupleCoordinates(couple: {
   locationLatitude?: number | null;
   locationLongitude?: number | null;
@@ -39,7 +51,8 @@ export function coupleCoordinates(couple: {
     Number.isFinite(lat) &&
     Number.isFinite(lng) &&
     Math.abs(lat) <= 90 &&
-    Math.abs(lng) <= 180
+    Math.abs(lng) <= 180 &&
+    isWithinServiceArea(lat, lng)
   ) {
     return { lat, lng };
   }
