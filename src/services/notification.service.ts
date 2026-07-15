@@ -237,7 +237,7 @@ export async function upsertMatchPendingNotification(params: {
     senderId: params.senderId,
     type: 'match',
     title: 'New Connection Request!',
-    message: `${params.profileName} wants to connect with you!`,
+    message: `${params.profileName} want to connect with you!`,
     groupKey: `match:pending:${params.matchId}`,
     data: {
       matchId: params.matchId,

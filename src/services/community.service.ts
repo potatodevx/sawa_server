@@ -289,7 +289,7 @@ export class CommunityService {
           senderId: me.coupleId,
           type: 'community',
           title: 'New Join Request',
-          message: `${me.profileName} wants to join.`,
+          message: `${me.profileName} want to join.`,
           groupKey: `community:join:${communityId}:${me.coupleId}`,
           data: notificationData,
         }),
