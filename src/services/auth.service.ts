@@ -289,14 +289,23 @@ export class AuthService {
       userRepository.findByPhone(phone),
     ]);
 
-    if (!result.valid || !result.coupleId) {
+    // Only check OTP validity — do NOT gate on coupleId here, since accounts
+    // registered before coupleId was reliably stored may have an empty coupleId.
+    if (!result.valid) {
       throw new AppError('Invalid or expired OTP', 400, 'INVALID_OTP');
     }
     if (!user) {
       throw new AppError('No account found with this number.', 404, 'USER_NOT_FOUND');
     }
 
-    const coupleId = user.coupleId || result.coupleId;
+    // Prefer the user's stored coupleId, fall back to the one stored with the OTP
+    // token, or generate a fresh one if both are missing (legacy accounts).
+    const coupleId = user.coupleId || result.coupleId || crypto.randomUUID();
+
+    // Persist the coupleId back to the user row if it was missing
+    if (!user.coupleId) {
+      await prisma.user.update({ where: { id: user.id }, data: { coupleId } });
+    }
 
     await assertNotBanned(coupleId);
 
