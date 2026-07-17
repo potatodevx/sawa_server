@@ -699,6 +699,46 @@ export class MatchService {
 
     return { success: true };
   }
+
+  /**
+   * Unfriend a couple — removes the accepted match so both sides can reconnect
+   * via say-hello again. Does NOT block or add to blocked list.
+   */
+  async unfriendCouple(requestingCoupleId: string, targetCoupleIdStr: string) {
+    const me = await prisma.couple.findUnique({ where: { coupleId: requestingCoupleId }, select: { coupleId: true } });
+    if (!me) throw new AppError('Profile not found', 404);
+
+    const target = await prisma.couple.findFirst({
+      where: { OR: [{ id: targetCoupleIdStr }, { coupleId: targetCoupleIdStr }] },
+      select: { coupleId: true }
+    });
+    if (!target) throw new AppError('Target profile not found', 404);
+
+    // Delete the match record so the connection is fully reset
+    await prisma.match.deleteMany({
+      where: {
+        OR: [
+          { couple1Id: me.coupleId, couple2Id: target.coupleId },
+          { couple2Id: me.coupleId, couple1Id: target.coupleId },
+        ]
+      }
+    });
+
+    // Notify both sides so UI updates immediately
+    const io = (global as any).io;
+    if (io) {
+      io.to(`couple:${me.coupleId}`).emit('match:accepted', {
+        targetCoupleId: target.coupleId,
+        action: 'unfriended',
+      });
+      io.to(`couple:${target.coupleId}`).emit('match:accepted', {
+        targetCoupleId: me.coupleId,
+        action: 'unfriended',
+      });
+    }
+
+    return { success: true };
+  }
 }
 
 export const matchService = new MatchService();

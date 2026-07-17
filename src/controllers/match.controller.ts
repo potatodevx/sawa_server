@@ -96,6 +96,14 @@ export const blockCouple = async (req: Request, res: Response): Promise<void> =>
   sendSuccess({ res, statusCode: 200, message: 'Couple blocked successfully', data: result });
 };
 
+export const unfriendCouple = async (req: Request, res: Response): Promise<void> => {
+  const { coupleId } = req.user!;
+  const { targetCoupleId } = req.body as z.infer<typeof MatchActionSchema>;
+
+  const result = await matchService.unfriendCouple(coupleId!, targetCoupleId);
+  sendSuccess({ res, statusCode: 200, message: 'Couple unfriended successfully', data: result });
+};
+
 export const getInsights = async (_req: Request, _res: Response): Promise<void> => {
   // Returns insights comparing the logged in couple with a target couple
 };

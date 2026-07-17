@@ -13,6 +13,7 @@ import {
   acceptMatch,
   rejectMatch,
   blockCouple,
+  unfriendCouple,
 } from '../controllers/match.controller';
 
 const router = Router();
@@ -45,6 +46,9 @@ router.post('/reject', validateMatchAction, asyncHandler(rejectMatch));
 
 // POST /api/v1/matches/block -> block a couple
 router.post('/block', validateMatchAction, asyncHandler(blockCouple));
+
+// POST /api/v1/matches/unfriend -> remove connection (can say-hello again to reconnect)
+router.post('/unfriend', validateMatchAction, asyncHandler(unfriendCouple));
 
 // GET /api/v1/matches/insights/:coupleId
 router.get('/insights/:coupleId', asyncHandler(getInsights));
