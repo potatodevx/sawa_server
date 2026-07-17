@@ -77,6 +77,7 @@ export class MatchService {
 
     const Q3_TITLES: Record<string, string> = {
       'q3-dinners-home': 'Dinners at home',
+      'q3-dinner': 'Dinner at home',
       'q3-restaurants': 'Exploring restaurants',
       'q3-outdoor': 'Outdoor activities',
       'q3-cultural': 'Cultural events',

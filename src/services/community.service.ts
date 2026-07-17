@@ -198,7 +198,7 @@ export class CommunityService {
                   recipientId: targetCoupleId,
                   senderId: me.coupleId,
                   type: 'community',
-                  title: 'Community Invitation',
+                  title: 'Group Invitation',
                   message: `${me.profileName} invited you to join ${community.name}`,
                   data: {
                     communityId: community.id,
@@ -382,7 +382,7 @@ export class CommunityService {
              senderId: me.coupleId,
              type: 'community',
              title: 'Request Accepted!',
-             message: `You joined the community!`,
+             message: `You joined the group!`,
              data: { communityId, requestType: 'accepted' },
           },
        });
@@ -651,7 +651,7 @@ export class CommunityService {
               recipientId: targetCouple.coupleId,
               senderId: me.coupleId,
               type: 'community',
-              title: 'Community Invitation',
+              title: 'Group Invitation',
               message: `${me.profileName} invited you to join ${community.name}`,
               data: {
                 communityId: community.id,

@@ -231,8 +231,10 @@ export class CoupleService {
         const optionLabelMap: Record<string, string> = {
           'q1-career': 'Building careers', 'q1-family': 'Family first', 'q1-settled': 'Newly settled', 'q1-living': 'Living it up',
           'q1-growing': 'Growing together', 'q1-adventure': 'Always exploring',
-          'q2-hosts': "The Hosts", 'q2-yes-couple': "The 'yes' couple", 'q2-planners': 'The Planners', 'q2-explorers': 'The Explorers',
-          'q3-dinners-home': 'Dinners at home', 'q3-restaurants': 'Exploring new restaurants', 'q3-outdoor': 'Outdoor activities/nature',
+          'q2-hosts': "The Hosts", 'q2-yes-couple': "The 'yes' couple", 'q2-yes': "The 'yes' couple",
+          'q2-planners': 'The Planners', 'q2-explorers': 'The Explorers',
+          'q3-dinners-home': 'Dinners at home', 'q3-dinner': 'Dinner at home',
+          'q3-restaurants': 'Exploring new restaurants', 'q3-outdoor': 'Outdoor activities/nature',
           'q3-cultural': 'Cultural events/museums', 'q3-drinks': 'Casual drinks', 'q3-trips': 'Weekend trips/travel',
           'q4-once-month': 'Meeting once a month', 'q4-twice-month': 'Meeting twice a month', 'q4-once-week': 'Meeting once a week', 'q4-when-fits': 'Meeting whenever it fits',
           'q5-similar-stage': 'Matches in a similar life stage', 'q5-shared-interests': 'Shared interests', 'q5-small-groups': 'Small group settings',
@@ -426,11 +428,32 @@ export class CoupleService {
     return this._formatCouple(updated);
   }
 
+  /** Resolve any raw option IDs that leaked into stored bio text (legacy data cleanup). */
+  private _sanitizeBio(bio: string | null | undefined): string | null | undefined {
+    if (!bio) return bio;
+    const replacements: Array<[RegExp, string]> = [
+      [/\bq3-dinner\b/gi, 'dinner at home'],
+      [/\bq3-dinners-home\b/gi, 'dinners at home'],
+      [/\bq3-restaurants\b/gi, 'exploring new restaurants'],
+      [/\bq3-outdoor\b/gi, 'outdoor activities'],
+      [/\bq3-cultural\b/gi, 'cultural events'],
+      [/\bq3-drinks\b/gi, 'casual drinks'],
+      [/\bq3-trips\b/gi, 'weekend trips'],
+      [/\bq[0-9]+-[a-z-]+\b/gi, ''],
+    ];
+    let cleaned = bio;
+    for (const [pattern, replacement] of replacements) {
+      cleaned = cleaned.replace(pattern, replacement);
+    }
+    return cleaned.replace(/\s{2,}/g, ' ').trim() || bio;
+  }
+
   private _formatCouple(couple: any) {
     if (!couple) return null;
     const formatted = { 
         ...couple, 
         _id: couple.id,
+        bio: this._sanitizeBio(couple.bio),
         location: {
             city: couple.locationCity,
             country: couple.locationCountry
