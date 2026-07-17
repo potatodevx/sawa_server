@@ -58,13 +58,19 @@ async function seed() {
     console.log('✅ Admin seeded');
 
     // 2. Seed Prompts
-    const { DEFAULT_CHAT_PROMPTS } = await import('../constants/chatPrompts');
-    const prompts = [...DEFAULT_CHAT_PROMPTS];
-    for (const text of prompts) {
+    const { DEFAULT_CHAT_PROMPTS, DEFAULT_GROUP_CHAT_PROMPTS } = await import('../constants/chatPrompts');
+    for (const text of DEFAULT_CHAT_PROMPTS) {
       await prisma.prompt.upsert({
         where: { text },
         update: {},
         create: { text, category: 'chat_shortcut', isActive: true }
+      });
+    }
+    for (const text of DEFAULT_GROUP_CHAT_PROMPTS) {
+      await prisma.prompt.upsert({
+        where: { text },
+        update: {},
+        create: { text, category: 'group_prompt', isActive: true }
       });
     }
     console.log('✅ Prompts seeded');

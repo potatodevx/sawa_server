@@ -35,7 +35,7 @@ const groupKeyFromData = (n: {
     if (
       d.requestType === 'join' ||
       title.includes('join request') ||
-      String(d.message || '').includes('wants to join')
+      String(d.message || '').includes('want to join')
     ) {
       return `community:join:${communityId}:${sender}`;
     }

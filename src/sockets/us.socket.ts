@@ -167,7 +167,7 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
       } else if (payload.kind === 'date_request') {
         const actLabel = payload.activity ? payload.activity : 'a date';
         const timeLabel = payload.time ? ` at ${payload.time}` : '';
-        const dateMsg = payload.date ? `Wants to go out on ${payload.date}${timeLabel} ✨` : 'Wants to plan something special ✨';
+        const dateMsg = payload.date ? `Want to go out on ${payload.date}${timeLabel} ✨` : 'Want to plan something special ✨';
         await saveUsNotification({
           coupleId,
           senderUserId: userId,
@@ -176,7 +176,7 @@ export const registerUsHandlers = (io: SocketIOServer, socket: Socket): void => 
           message: payload.note ? `${dateMsg.replace(' ✨', '')} — "${payload.note}"` : dateMsg.replace(' ✨', ''),
           extraData: { date: payload.date, rawDate: payload.rawDate, activity: payload.activity, time: payload.time, note: payload.note, kind: 'date_request', planBy: payload.planBy || senderName },
         });
-        pushTitle = `${senderName} wants to plan ${actLabel} 📅`;
+        pushTitle = `${senderName} want to plan ${actLabel} 📅`;
 
       } else if (payload.kind === 'date_accept') {
         await saveUsNotification({
