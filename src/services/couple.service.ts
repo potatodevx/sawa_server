@@ -2,7 +2,6 @@ import { prisma } from '../lib/prisma';
 import { AppError } from '../utils/AppError';
 import { logger } from '../utils/logger';
 import { emitRealtimeNotification } from '../utils/realtime';
-import { cityFromCoords } from '../utils/geo';
 
 export class CoupleService {
   /**
@@ -231,10 +230,8 @@ export class CoupleService {
         const optionLabelMap: Record<string, string> = {
           'q1-career': 'Building careers', 'q1-family': 'Family first', 'q1-settled': 'Newly settled', 'q1-living': 'Living it up',
           'q1-growing': 'Growing together', 'q1-adventure': 'Always exploring',
-          'q2-hosts': "The Hosts", 'q2-yes-couple': "The 'yes' couple", 'q2-yes': "The 'yes' couple",
-          'q2-planners': 'The Planners', 'q2-explorers': 'The Explorers',
-          'q3-dinners-home': 'Dinners at home', 'q3-dinner': 'Dinner at home',
-          'q3-restaurants': 'Exploring new restaurants', 'q3-outdoor': 'Outdoor activities/nature',
+          'q2-hosts': "The Hosts", 'q2-yes-couple': "The 'yes' couple", 'q2-planners': 'The Planners', 'q2-explorers': 'The Explorers',
+          'q3-dinners-home': 'Dinners at home', 'q3-restaurants': 'Exploring new restaurants', 'q3-outdoor': 'Outdoor activities/nature',
           'q3-cultural': 'Cultural events/museums', 'q3-drinks': 'Casual drinks', 'q3-trips': 'Weekend trips/travel',
           'q4-once-month': 'Meeting once a month', 'q4-twice-month': 'Meeting twice a month', 'q4-once-week': 'Meeting once a week', 'q4-when-fits': 'Meeting whenever it fits',
           'q5-similar-stage': 'Matches in a similar life stage', 'q5-shared-interests': 'Shared interests', 'q5-small-groups': 'Small group settings',
@@ -310,18 +307,14 @@ export class CoupleService {
     const lat = data.locationLatitude;
     const lng = data.locationLongitude;
     if (lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng)) {
-      // Only persist coordinates that resolve to one of the cities the app
-      // serves. This blocks emulator / test-device GPS fixes (e.g. Mountain
-      // View, CA) from being written to the DB — those would later appear as
-      // ~13 900 km from Chennai and break every distance card in the feed.
-      const derivedCity = cityFromCoords(lat, lng);
-      if (derivedCity) {
+      // Only persist coordinates within India's service area (lat 6–38, lng 68–98).
+      // Emulator defaults like Mountain View, CA (37.4°N, 122°W) are rejected so
+      // they never cause "13 000 km away" distances in the discovery feed.
+      const inServiceArea = lat >= 6 && lat <= 38 && lng >= 68 && lng <= 98;
+      if (inServiceArea) {
         updateData.locationLatitude = lat;
         updateData.locationLongitude = lng;
-        updateData.locationCity = derivedCity;
       }
-      // When coordinates don't resolve to a supported city (emulator, VPN, etc.)
-      // we still honour an explicit city name sent by the client if it's valid.
     }
 
     // 1. Photos processing
@@ -428,32 +421,11 @@ export class CoupleService {
     return this._formatCouple(updated);
   }
 
-  /** Resolve any raw option IDs that leaked into stored bio text (legacy data cleanup). */
-  private _sanitizeBio(bio: string | null | undefined): string | null | undefined {
-    if (!bio) return bio;
-    const replacements: Array<[RegExp, string]> = [
-      [/\bq3-dinner\b/gi, 'dinner at home'],
-      [/\bq3-dinners-home\b/gi, 'dinners at home'],
-      [/\bq3-restaurants\b/gi, 'exploring new restaurants'],
-      [/\bq3-outdoor\b/gi, 'outdoor activities'],
-      [/\bq3-cultural\b/gi, 'cultural events'],
-      [/\bq3-drinks\b/gi, 'casual drinks'],
-      [/\bq3-trips\b/gi, 'weekend trips'],
-      [/\bq[0-9]+-[a-z-]+\b/gi, ''],
-    ];
-    let cleaned = bio;
-    for (const [pattern, replacement] of replacements) {
-      cleaned = cleaned.replace(pattern, replacement);
-    }
-    return cleaned.replace(/\s{2,}/g, ' ').trim() || bio;
-  }
-
   private _formatCouple(couple: any) {
     if (!couple) return null;
     const formatted = { 
         ...couple, 
         _id: couple.id,
-        bio: this._sanitizeBio(couple.bio),
         location: {
             city: couple.locationCity,
             country: couple.locationCountry
@@ -498,10 +470,8 @@ export class CoupleService {
   // Lightweight public profile — skips communityMembers and answers.
   // Used by getCoupleById (viewing another couple's profile card).
   async getCoupleSummary(coupleId: string): Promise<any | null> {
-    // Resolve by either the business coupleId OR the internal cuid id, so a
-    // shared link works regardless of which id it carries.
-    const couple = await prisma.couple.findFirst({
-      where: { OR: [{ coupleId }, { id: coupleId }] },
+    const couple = await prisma.couple.findUnique({
+      where: { coupleId },
       include: {
         partner1: { select: { id: true, name: true, email: true, dob: true } },
         partner2: { select: { id: true, name: true, email: true, dob: true } },

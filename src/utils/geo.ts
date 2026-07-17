@@ -1,27 +1,5 @@
-export type GeoPoint = { lat: number; lng: number };
-
-/**
- * Canonical centroids for the cities the app serves. These are the SINGLE
- * source of truth for turning real GPS coordinates into a city label
- * (see `cityFromCoords`). Names here must match the client's supported-city
- * display names exactly so discovery city filters keep working.
- */
-export const SUPPORTED_CITY_CENTROIDS: ReadonlyArray<{ name: string } & GeoPoint> = [
-  { name: 'Bangalore', lat: 12.9716, lng: 77.5946 },
-  { name: 'Chennai', lat: 13.0827, lng: 80.2707 },
-  { name: 'New Delhi', lat: 28.6139, lng: 77.209 },
-  { name: 'Mumbai', lat: 19.076, lng: 72.8777 },
-  { name: 'Gurgaon', lat: 28.4595, lng: 77.0266 },
-  { name: 'Noida', lat: 28.5355, lng: 77.391 },
-  { name: 'Hyderabad', lat: 17.385, lng: 78.4867 },
-  { name: 'Goa', lat: 15.4909, lng: 73.8278 },
-];
-
-/** Max distance from a city centroid for a GPS fix to be labelled that city. */
-export const CITY_SNAP_RADIUS_KM = 75;
-
-/** City centroids (with aliases) for distance when exact GPS is not stored yet. */
-const CITY_COORDS: Record<string, GeoPoint> = {
+/** City centroids for distance when exact GPS is not stored yet. */
+const CITY_COORDS: Record<string, { lat: number; lng: number }> = {
   bangalore: { lat: 12.9716, lng: 77.5946 },
   bengaluru: { lat: 12.9716, lng: 77.5946 },
   chennai: { lat: 13.0827, lng: 80.2707 },
@@ -32,8 +10,10 @@ const CITY_COORDS: Record<string, GeoPoint> = {
   gurugram: { lat: 28.4595, lng: 77.0266 },
   noida: { lat: 28.5355, lng: 77.391 },
   hyderabad: { lat: 17.385, lng: 78.4867 },
-  goa: { lat: 15.4909, lng: 73.8278 },
+  goa: { lat: 15.2993, lng: 74.124 },
 };
+
+export type GeoPoint = { lat: number; lng: number };
 
 export function cityCentroid(city?: string | null): GeoPoint | null {
   if (!city) return null;
@@ -44,6 +24,18 @@ export function cityCentroid(city?: string | null): GeoPoint | null {
     if (lower.includes(key)) return coords;
   }
   return null;
+}
+
+/**
+ * Returns true when the coordinates fall within the approximate bounding box
+ * that covers all cities the app serves (India + Goa). This blocks emulator
+ * defaults like Mountain View, CA (37.4°N, 122°W) from being used for
+ * distance calculations.
+ *   Lat  6 – 38 °N  (Kanyakumari to Kashmir)
+ *   Lng 68 – 98 °E  (Gujarat coast to Arunachal)
+ */
+function isWithinServiceArea(lat: number, lng: number): boolean {
+  return lat >= 6 && lat <= 38 && lng >= 68 && lng <= 98;
 }
 
 export function coupleCoordinates(couple: {
@@ -60,14 +52,9 @@ export function coupleCoordinates(couple: {
     Number.isFinite(lng) &&
     Math.abs(lat) <= 90 &&
     Math.abs(lng) <= 180 &&
-    lat >= 6 && lat <= 38 && lng >= 68 && lng <= 98
+    isWithinServiceArea(lat, lng)
   ) {
-    // Only trust coordinates that snap to one of the cities the app serves.
-    // This prevents emulator/test GPS (e.g. Mountain View, CA → ~13 900 km
-    // from Chennai) from being used in distance calculations.
-    if (cityFromCoords(lat, lng) !== null) {
-      return { lat, lng };
-    }
+    return { lat, lng };
   }
   return cityCentroid(couple.locationCity);
 }
@@ -87,39 +74,6 @@ export function distanceKmBetween(a: GeoPoint, b: GeoPoint): number {
     Math.sin(dLat / 2) ** 2 +
     Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-}
-
-/**
- * Derives the served-city label from real GPS coordinates by snapping to the
- * nearest supported city centroid within CITY_SNAP_RADIUS_KM. Returns null when
- * the coordinates are invalid or too far from any supported city (in which case
- * callers keep the reverse-geocoded place name / leave the city untouched).
- * This is the single source of truth for city labels so they always agree with
- * the stored coordinates.
- */
-export function cityFromCoords(
-  lat?: number | null,
-  lng?: number | null,
-  maxKm: number = CITY_SNAP_RADIUS_KM,
-): string | null {
-  if (
-    lat == null ||
-    lng == null ||
-    !Number.isFinite(lat) ||
-    !Number.isFinite(lng) ||
-    Math.abs(lat) > 90 ||
-    Math.abs(lng) > 180 ||
-    (lat === 0 && lng === 0)
-  ) {
-    return null;
-  }
-
-  let best: { name: string; km: number } | null = null;
-  for (const c of SUPPORTED_CITY_CENTROIDS) {
-    const km = distanceKmBetween({ lat, lng }, { lat: c.lat, lng: c.lng });
-    if (best === null || km < best.km) best = { name: c.name, km };
-  }
-  return best && best.km <= maxKm ? best.name : null;
 }
 
 export function formatDistanceLabel(km: number | null | undefined): string {
