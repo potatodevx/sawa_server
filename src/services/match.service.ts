@@ -31,17 +31,39 @@ export class MatchService {
     const blockedIds = me.blocked || [];
     const SUPPORTED_CITIES = ['Bangalore', 'Chennai', 'New Delhi', 'Delhi', 'Mumbai', 'Gurgaon', 'Noida', 'Hyderabad', 'Goa'];
 
-    // Get interacted IDs in BOTH directions so already-connected couples don't re-appear
+    // ── Build the "self" exclusion set ───────────────────────────────────────
+    // We must exclude ALL couple records that belong to the same users, not just
+    // me.coupleId. Legacy bugs (randomUUID fallback) could have created duplicate
+    // couple rows for the same partner pair. Any of those rows could be
+    // isProfileComplete=true and appear in the feed otherwise.
+    const selfCoupleIds = new Set<string>([me.coupleId, requestingCoupleId].filter(Boolean));
+
+    // Find every couple that shares either partner with me.
+    const partnerConditions: any[] = [];
+    if (me.partner1Id) partnerConditions.push({ partner1Id: me.partner1Id }, { partner2Id: me.partner1Id });
+    if (me.partner2Id) partnerConditions.push({ partner1Id: me.partner2Id }, { partner2Id: me.partner2Id });
+
+    if (partnerConditions.length > 0) {
+      const siblingCouples = await prisma.couple.findMany({
+        where: { OR: partnerConditions },
+        select: { coupleId: true },
+      });
+      siblingCouples.forEach((c: any) => selfCoupleIds.add(c.coupleId));
+    }
+    const selfIds = Array.from(selfCoupleIds).filter(Boolean);
+
+    // Get interacted IDs in BOTH directions so already-connected couples don't re-appear.
+    // Check ALL self coupleIds so even duplicate rows don't re-surface.
     const interactions = await prisma.match.findMany({
-      where: { OR: [{ couple1Id: me.coupleId }, { couple2Id: me.coupleId }] },
+      where: { OR: [{ couple1Id: { in: selfIds } }, { couple2Id: { in: selfIds } }] },
       select: { couple1Id: true, couple2Id: true }
     });
     const interactedIds = Array.from(new Set(
-      interactions.flatMap((m: any) => [m.couple1Id, m.couple2Id]).filter((id: string) => id !== me.coupleId)
+      interactions.flatMap((m: any) => [m.couple1Id, m.couple2Id]).filter((id: string) => !selfCoupleIds.has(id))
     ));
 
     const where: any = {
-      coupleId: { not: me.coupleId, notIn: [...interactedIds, ...blockedIds] },
+      coupleId: { notIn: [...selfIds, ...interactedIds, ...blockedIds] },
       isProfileComplete: true,
       isOpenToMeeting: true,
     };
