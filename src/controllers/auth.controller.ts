@@ -114,7 +114,7 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
 
   sendSuccess({
     res,
-    data: { accessToken: result.accessToken },
+    data: { accessToken: result.accessToken, refreshToken: result.refreshToken },
     message: 'Token refreshed',
   });
 };

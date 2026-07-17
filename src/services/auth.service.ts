@@ -182,7 +182,7 @@ export class AuthService {
   /**
    * STEP 3 — Refresh
    */
-  async refreshAccessToken(refreshToken: string): Promise<{ accessToken: string }> {
+  async refreshAccessToken(refreshToken: string): Promise<{ accessToken: string; refreshToken: string }> {
     const payload = verifyRefreshToken(refreshToken);
 
     const user = await userRepository.findByIdWithRefreshToken(payload.userId);
@@ -194,13 +194,24 @@ export class AuthService {
       throw new AppError('Refresh token mismatch', 401, 'INVALID_REFRESH_TOKEN');
     }
 
+    const resolvedCoupleId = payload.coupleId ?? user.coupleId ?? undefined;
+
     const accessToken = signAccessToken({
       userId: user.id,
       coupleMongoId: payload.coupleMongoId,
-      coupleId: payload.coupleId ?? user.coupleId ?? undefined,
+      coupleId: resolvedCoupleId,
     });
 
-    return { accessToken };
+    // Rolling refresh — issue a fresh refresh token so the session
+    // keeps extending as long as the user is active.
+    const newRefreshToken = signRefreshToken({
+      userId: user.id,
+      coupleMongoId: payload.coupleMongoId,
+      coupleId: resolvedCoupleId,
+    });
+    await userRepository.saveRefreshTokenHash(user.id, hashToken(newRefreshToken));
+
+    return { accessToken, refreshToken: newRefreshToken };
   }
 
   /**
