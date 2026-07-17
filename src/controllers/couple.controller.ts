@@ -77,10 +77,13 @@ const SubmitAnswersSchema = z.object({
 });
 
 const CompleteOnboardingSchema = z.object({
-  yourName: z.string().min(1, 'Your name is required'),
+  // Profile fields are optional — each step saves data to the server immediately,
+  // so a reinstall scenario (no local cache) still works because the DB already
+  // has the data from earlier steps.  We only call setupProfile when names are present.
+  yourName: z.string().min(1).optional().or(z.literal('')),
   yourEmail: z.string().optional().or(z.literal('')),
   yourDob: z.string().optional().or(z.literal('')),
-  partnerName: z.string().min(1, "Partner's name is required"),
+  partnerName: z.string().min(1).optional().or(z.literal('')),
   partnerEmail: z.string().optional().or(z.literal('')),
   partnerDob: z.string().optional().or(z.literal('')),
   relationshipStatus: z.string().optional(),
@@ -91,7 +94,7 @@ const CompleteOnboardingSchema = z.object({
       questionId: z.string(),
       selectedOptionIds: z.array(z.string()),
     })
-  ),
+  ).optional().default([]),
   location: z.object({
     city: z.string().optional(),
     country: z.string().optional(),
@@ -191,18 +194,23 @@ export const getOnboardingStatus = async (req: Request, res: Response) => {
 
   // Return partial profile data so the client can pre-fill onboarding forms
   // after a reinstall without asking the user to retype everything.
+  // "your" = the logged-in user, "partner" = the other person.
+  const isPartner1 = couple.partner1Id === userId;
+  const me = isPartner1 ? couple.partner1 : couple.partner2;
+  const other = isPartner1 ? couple.partner2 : couple.partner1;
+
   const resumeData = {
     step,
     isComplete: couple.isProfileComplete,
     profile: {
       profileName: couple.profileName,
       relationshipStatus: couple.relationshipStatus,
-      yourName: couple.partner1?.name ?? null,
-      yourDob: couple.partner1?.dob ?? null,
-      yourEmail: couple.partner1?.email ?? null,
-      partnerName: couple.partner2?.name ?? null,
-      partnerDob: couple.partner2?.dob ?? null,
-      partnerEmail: couple.partner2?.email ?? null,
+      yourName: me?.name ?? null,
+      yourDob: me?.dob ?? null,
+      yourEmail: me?.email ?? null,
+      partnerName: other?.name ?? null,
+      partnerDob: other?.dob ?? null,
+      partnerEmail: other?.email ?? null,
     },
     hasPhoto: !!couple.primaryPhoto,
     hasAnswers: (couple.answers?.length ?? 0) > 0,
@@ -237,16 +245,36 @@ export const completeOnboarding = async (req: Request, res: Response) => {
   console.log(`[CoupleController] completeOnboarding START for coupleId: ${coupleId}`);
 
   try {
-    // 1. First ensure the couple profile exists (Sequential because others depend on it)
-    await coupleService.setupProfile(userId, coupleId!, data);
+    // 1. Only run setupProfile when names are present in the payload.
+    //    Each onboarding step already saves to the server immediately, so on a
+    //    reinstall the profile data lives in the DB — we just skip re-saving it.
+    const hasProfileData = data.yourName && data.yourName.trim().length > 0
+      && data.partnerName && data.partnerName.trim().length > 0;
 
-    // 2. Parallelize photo processing and answers (These only update existing fields)
-    await Promise.all([
-       coupleService.uploadPhotos(coupleId!, data),
-       coupleService.submitAnswers(coupleId!, data.answers)
-    ]);
+    if (hasProfileData) {
+      await coupleService.setupProfile(userId, coupleId!, data as any);
+    } else {
+      console.log(`[CoupleController] completeOnboarding: no profile names in payload — skipping setupProfile (reinstall scenario)`);
+    }
 
-    // 3. Fetch final updated profile to return
+    // 2. Parallelize photo and answer saves (both are idempotent / additive).
+    const tasks: Promise<any>[] = [];
+    if (data.primaryPhotoBase64 || (data.secondaryPhotosBase64 && data.secondaryPhotosBase64.length > 0)) {
+      tasks.push(coupleService.uploadPhotos(coupleId!, data));
+    }
+    if (data.answers && data.answers.length > 0) {
+      tasks.push(coupleService.submitAnswers(coupleId!, data.answers));
+    }
+    if (tasks.length > 0) await Promise.all(tasks);
+
+    // 3. Always mark the profile as complete — this is the authoritative step.
+    await prisma.couple.update({
+      where: { coupleId: coupleId! },
+      data: { isProfileComplete: true },
+    });
+    await invalidateCoupleProfile(coupleId!);
+
+    // 4. Fetch the final profile to return to the client.
     const couple = await coupleService.getCouple(coupleId!);
 
     console.log(`[CoupleController] completeOnboarding SUCCESS for coupleId: ${coupleId}`);
