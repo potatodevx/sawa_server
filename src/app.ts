@@ -1,3 +1,4 @@
+import os from 'os';
 import express, { Application, Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -209,6 +210,15 @@ export const createApp = (): Application => {
       environment: env.NODE_ENV,
       db: { type: 'postgresql (prisma)', status: dbStatus },
       redis: { status: redisStatus },
+      // Cluster diagnostics: pmId is the PM2 worker index (undefined => single
+      // fork process). Hitting /health repeatedly should surface different
+      // pid/pmId pairs when cluster mode is live. cpus = cores visible to Node.
+      worker: {
+        pmId: process.env.pm_id ?? process.env.NODE_APP_INSTANCE ?? 'single',
+        pid: process.pid,
+        cpus: os.cpus().length,
+        uptimeSec: Math.round(process.uptime()),
+      },
       // pushEnabled === false means FIREBASE_SERVICE_ACCOUNT_JSON is missing or
       // invalid on this server → no push notifications will be delivered.
       pushEnabled: isPushEnabled(),
