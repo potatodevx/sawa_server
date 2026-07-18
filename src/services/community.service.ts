@@ -3,14 +3,16 @@ import { AppError } from '../utils/AppError';
 import { logger } from '../utils/logger';
 import { emitRealtimeNotification } from '../utils/realtime';
 import { upsertGroupedNotification } from './notification.service';
+import { cacheGet, cacheSet, cacheInvalidatePattern } from '../lib/cache';
 
-// In-memory TTL cache for getAllCommunities — avoids repeated heavy queries
-// for the same user within 30 seconds. Invalidated on join/leave/create.
-const commListCache = new Map<string, { data: any[]; expiresAt: number }>();
-const COMM_CACHE_TTL_MS = 30_000;
+// Shared TTL cache for getAllCommunities — avoids repeated heavy queries for
+// the same user within 30 seconds. Backed by Redis so hits AND invalidations
+// (join/leave/create/invite) are consistent across PM2 cluster workers; falls
+// back to an in-process map automatically when Redis isn't configured.
+const COMM_CACHE_TTL_SECONDS = 30;
 
 function commCacheKey(coupleId: string, city?: string) {
-  return `${coupleId}:${city ?? ''}`;
+  return `sawa:commlist:${coupleId}:${city ?? ''}`;
 }
 
 export class CommunityService {
@@ -18,9 +20,13 @@ export class CommunityService {
   async getAllCommunities(requestingCoupleId: string, cityFilter?: string) {
     // Serve from cache if still fresh
     const cacheKey = commCacheKey(requestingCoupleId, cityFilter);
-    const cached = commListCache.get(cacheKey);
-    if (cached && Date.now() < cached.expiresAt) {
-      return cached.data;
+    const cachedRaw = await cacheGet(cacheKey);
+    if (cachedRaw) {
+      try {
+        return JSON.parse(cachedRaw);
+      } catch {
+        /* corrupt entry — fall through and rebuild */
+      }
     }
     const me = await prisma.couple.findUnique({
       where: { coupleId: requestingCoupleId },
@@ -104,16 +110,14 @@ export class CommunityService {
       };
     });
 
-    // Store in cache
-    commListCache.set(cacheKey, { data: result, expiresAt: Date.now() + COMM_CACHE_TTL_MS });
+    // Store in cache (best-effort — never block the response on the write)
+    await cacheSet(cacheKey, JSON.stringify(result), COMM_CACHE_TTL_SECONDS);
     return result;
   }
 
   // Invalidate all cache entries for a couple (call after join/leave/create/invite)
-  invalidateCommListCache(coupleId: string) {
-    for (const key of commListCache.keys()) {
-      if (key.startsWith(`${coupleId}:`)) commListCache.delete(key);
-    }
+  async invalidateCommListCache(coupleId: string) {
+    await cacheInvalidatePattern(`sawa:commlist:${coupleId}:*`);
   }
 
   async getMyCommunities(requestingCoupleId: string) {
@@ -234,7 +238,7 @@ export class CommunityService {
       );
     }
 
-    this.invalidateCommListCache(requestingCoupleId);
+    await this.invalidateCommListCache(requestingCoupleId);
     return { _id: community.id, id: community.id, name: community.name };
   }
 
@@ -308,7 +312,7 @@ export class CommunityService {
       ),
     );
 
-    this.invalidateCommListCache(requestingCoupleId);
+    await this.invalidateCommListCache(requestingCoupleId);
     return { status: 'requested' };
   }
 
@@ -349,11 +353,11 @@ export class CommunityService {
         prisma.communityJoinRequest.deleteMany({ where: { communityId } }),
         prisma.community.delete({ where: { id: communityId } })
       ]);
-      this.invalidateCommListCache(requestingCoupleId);
+      await this.invalidateCommListCache(requestingCoupleId);
       return { status: 'deleted' };
     }
 
-    this.invalidateCommListCache(requestingCoupleId);
+    await this.invalidateCommListCache(requestingCoupleId);
     return { status: 'left' };
   }
 

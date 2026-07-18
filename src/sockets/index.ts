@@ -101,8 +101,9 @@ export const createSocketServer = (httpServer: HTTPServer): SocketIOServer => {
   });
 
   io.on('connection', (socket: Socket) => {
-    logger.info(`✨ Socket Connected: ${socket.id}`);
-    
+    // Per-connection chatter is debug-only so production logs stay readable at scale.
+    logger.debug(`✨ Socket Connected: ${socket.id}`);
+
     registerChatHandlers(io, socket);
     registerMatchHandlers(io, socket);
     registerUsHandlers(io, socket);
@@ -112,7 +113,7 @@ export const createSocketServer = (httpServer: HTTPServer): SocketIOServer => {
     }
 
     socket.on('disconnect', (reason) => {
-      logger.info(`Socket disconnected: ${socket.id} — ${reason}`);
+      logger.debug(`Socket disconnected: ${socket.id} — ${reason}`);
     });
   });
 

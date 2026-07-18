@@ -68,18 +68,40 @@ const start = async (): Promise<void> => {
   }
 
   // ─── Graceful Shutdown ──────────────────────────────────────────────────────
+  let shuttingDown = false;
   const shutdown = (signal: string): void => {
+    if (shuttingDown) return; // ignore duplicate signals
+    shuttingDown = true;
     logger.info(`\n⚠️   ${signal} received. Shutting down gracefully...`);
-    httpServer.close(() => {
-      logger.info('✅  HTTP server closed.');
-      process.exit(0);
-    });
 
-    // Force exit after 10s if server hasn't closed
-    setTimeout(() => {
+    // Force exit if the graceful drain hasn't finished in time.
+    const forceTimer = setTimeout(() => {
       logger.error('❌  Forced shutdown after timeout.');
       process.exit(1);
     }, 10_000);
+    forceTimer.unref();
+
+    // 1. Stop accepting new HTTP connections. 2. Close Socket.IO (disconnects
+    // clients cleanly). 3. Release the Prisma connection pool. Each step is
+    // best-effort so one failing step never blocks the others.
+    httpServer.close(async () => {
+      logger.info('✅  HTTP server closed.');
+      try {
+        await new Promise<void>((resolve) => io.close(() => resolve()));
+        logger.info('✅  Socket.io closed.');
+      } catch (err) {
+        logger.error('⚠️  Error closing Socket.io:', err);
+      }
+      try {
+        const { prisma } = await import('./lib/prisma');
+        await prisma.$disconnect();
+        logger.info('✅  Prisma disconnected.');
+      } catch (err) {
+        logger.error('⚠️  Error disconnecting Prisma:', err);
+      }
+      clearTimeout(forceTimer);
+      process.exit(0);
+    });
   };
 
   process.on('SIGTERM', () => shutdown('SIGTERM'));

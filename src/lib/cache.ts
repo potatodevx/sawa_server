@@ -91,6 +91,22 @@ export async function cacheInvalidate(key: string): Promise<void> {
   try { await redis.del(key); } catch { localDel(key); }
 }
 
+/**
+ * Best-effort Redis liveness probe for the /health endpoint.
+ * Returns 'ok' when a PING succeeds, 'down' when Redis is configured but
+ * unreachable, and 'disabled' when no REDIS_URL is set (local dev).
+ */
+export async function cachePing(): Promise<'ok' | 'down' | 'disabled'> {
+  const redis = getRedis();
+  if (!redis) return 'disabled';
+  try {
+    await redis.ping();
+    return 'ok';
+  } catch {
+    return 'down';
+  }
+}
+
 export async function cacheInvalidatePattern(pattern: string): Promise<void> {
   const redis = getRedis();
   if (!redis) { localDelPattern(pattern); return; }

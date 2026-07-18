@@ -151,8 +151,14 @@ export const createApp = (): Application => {
   app.use(compression());
 
   // ─── Logging ─────────────────────────────────────────────────────────────────
+  // Skip the high-frequency infra probes (/health, /wakeup) so production logs
+  // aren't drowned by the healthcheck + self-wakeup traffic.
   if (env.NODE_ENV !== 'test') {
-    app.use(morgan(env.NODE_ENV === 'development' ? 'dev' : 'combined'));
+    app.use(
+      morgan(env.NODE_ENV === 'development' ? 'dev' : 'combined', {
+        skip: (req) => req.url === '/health' || req.url === '/wakeup',
+      }),
+    );
   }
 
   // ─── Performance Monitoring ──────────────────────────────────────────────────
@@ -168,13 +174,41 @@ export const createApp = (): Application => {
   });
 
   // ─── Health Check ────────────────────────────────────────────────────────────
-  app.get('/health', (_req: Request, res: Response) => {
-    res.status(200).json({
-      success: true,
-      status: 'healthy',
+  // Deep check: verifies the process can actually reach Postgres (and reports
+  // Redis) so the orchestrator restarts a worker that is up but can't serve
+  // traffic. Returns 503 only when the DB is unreachable — Redis is optional
+  // and never fails the check on its own.
+  app.get('/health', async (_req: Request, res: Response) => {
+    const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> =>
+      Promise.race([
+        p,
+        new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+      ]);
+
+    let dbStatus: 'ok' | 'down' = 'ok';
+    try {
+      const { prisma } = await import('./lib/prisma');
+      await withTimeout(prisma.$queryRaw`SELECT 1`, 3000);
+    } catch {
+      dbStatus = 'down';
+    }
+
+    let redisStatus: 'ok' | 'down' | 'disabled' = 'disabled';
+    try {
+      const { cachePing } = await import('./lib/cache');
+      redisStatus = await withTimeout(cachePing(), 2000);
+    } catch {
+      redisStatus = 'down';
+    }
+
+    const healthy = dbStatus === 'ok';
+    res.status(healthy ? 200 : 503).json({
+      success: healthy,
+      status: healthy ? 'healthy' : 'unhealthy',
       service: 'sawa-server',
       environment: env.NODE_ENV,
-      db: { type: 'postgresql (prisma)' },
+      db: { type: 'postgresql (prisma)', status: dbStatus },
+      redis: { status: redisStatus },
       // pushEnabled === false means FIREBASE_SERVICE_ACCOUNT_JSON is missing or
       // invalid on this server → no push notifications will be delivered.
       pushEnabled: isPushEnabled(),
