@@ -66,7 +66,8 @@ export class AuthService {
     });
 
     // Both user rows + both OTPs can be kicked off in parallel once the couple row exists.
-    const partnerCodeMsg = `Welcome to SAWA! Use {{code}} to verify your shared profile. Download it here: https://apps.apple.com/in/app/sawa-made-for-two/id514584879`;
+    const appUrl = (env.APP_URL || 'https://sawa.living').replace(/\/$/, '');
+    const partnerCodeMsg = `Welcome to SAWA! Use {{code}} to verify your shared profile. Download here: ${appUrl}/app`;
 
     await Promise.all([
       userRepository.upsertByPhone(yourPhone, coupleId, 'primary'),
@@ -422,8 +423,11 @@ export class AuthService {
   }
 
   async sendPartnerInvite(partnerPhone: string): Promise<boolean> {
-    const inviteLink = "https://apps.apple.com/in/app/sawa-made-for-two/id514584879";
-    const msg = `Hi! Your partner has invited you to join them on SAWA: ${inviteLink}`;
+    // Use the server's /app page which auto-detects Android vs iOS and redirects
+    // to Play Store or App Store accordingly. Falls back to sawa.living if no APP_URL.
+    const appUrl = (env.APP_URL || 'https://sawa.living').replace(/\/$/, '');
+    const inviteLink = `${appUrl}/app`;
+    const msg = `Hi! Your partner has invited you to join them on SAWA — the app for couples. Download here: ${inviteLink}`;
     return otpService.sendInvitation(partnerPhone, msg);
   }
 }
