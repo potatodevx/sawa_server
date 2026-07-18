@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import type { Readable } from 'stream';
 import {
   S3Client,
   PutObjectCommand,
@@ -31,15 +32,14 @@ export function isStorageConfigured(): boolean {
 }
 
 /**
- * Images require a DEDICATED public bucket + public base URL. Until both are
- * set we must NOT move images to S3 (they would land in the private voice
- * bucket and serve 403). When false, image writes safely keep storing base64,
- * exactly as before — so this can deploy ahead of the bucket being created.
+ * Images are stored in the SAME (private) bucket under the `image/` prefix and
+ * served back through our own `/img/<key>` proxy endpoint — so no public bucket
+ * or dashboard config is required. We only need object storage + a base URL
+ * (APP_URL) to build the stable proxy links. When false, image writes safely
+ * keep storing base64 exactly as before (graceful, deploy-ahead-safe).
  */
 export function isImageStorageConfigured(): boolean {
-  return Boolean(
-    isStorageConfigured() && env.S3_IMAGE_BUCKET && env.S3_IMAGE_PUBLIC_BASE_URL,
-  );
+  return Boolean(isStorageConfigured() && env.APP_URL);
 }
 
 function getClient(): S3Client {
@@ -57,14 +57,18 @@ function getClient(): S3Client {
   return _client;
 }
 
-/** True for object keys that live in the public image bucket. */
+/** True for object keys that hold images (served via the /img proxy). */
 function isImageKey(key: string): boolean {
   return key.startsWith('image/');
 }
 
-/** Resolve which bucket an object key belongs to. */
-function bucketForKey(key: string): string | undefined {
-  return isImageKey(key) ? env.S3_IMAGE_BUCKET || env.S3_BUCKET : env.S3_BUCKET;
+/**
+ * All objects live in the single configured bucket. (S3_IMAGE_BUCKET is honored
+ * if a separate bucket is ever introduced, but by default images share the
+ * voice bucket under the `image/` prefix.)
+ */
+function bucketForKey(_key: string): string | undefined {
+  return env.S3_IMAGE_BUCKET || env.S3_BUCKET;
 }
 
 function bucketForFolder(folder: 'voice' | 'image'): string | undefined {
@@ -72,20 +76,45 @@ function bucketForFolder(folder: 'voice' | 'image'): string | undefined {
 }
 
 /**
- * Build the public URL for a stored object key.
- * Image keys resolve against the dedicated public image bucket / CDN base URL;
- * everything else (voice) uses the private bucket base (only meaningful for
- * presigned access).
+ * Build the URL stored for an object key.
+ * - Images → a STABLE proxy URL on our own server (`<APP_URL>/img/<key>`) that
+ *   streams the object from the private bucket with long cache headers. This
+ *   needs no public bucket and lets the app cache images by URL.
+ * - Everything else (voice) → the raw bucket URL (only used for presigned access).
  */
 export function publicUrlForKey(key: string): string {
-  const isImage = isImageKey(key);
-  const base = isImage ? env.S3_IMAGE_PUBLIC_BASE_URL : env.S3_PUBLIC_BASE_URL;
-  if (base) {
-    return `${base.replace(/\/$/, '')}/${key}`;
+  if (isImageKey(key) && env.APP_URL) {
+    return `${env.APP_URL.replace(/\/$/, '')}/img/${key}`;
+  }
+  if (!isImageKey(key) && env.S3_PUBLIC_BASE_URL) {
+    return `${env.S3_PUBLIC_BASE_URL.replace(/\/$/, '')}/${key}`;
   }
   const endpoint = (env.S3_ENDPOINT || '').replace(/\/$/, '');
-  const bucket = bucketForKey(key);
-  return `${endpoint}/${bucket}/${key}`;
+  return `${endpoint}/${bucketForKey(key)}/${key}`;
+}
+
+/**
+ * Stream an object out of the (private) bucket — used by the public /img proxy.
+ * Returns null when storage is unavailable or the object is missing.
+ */
+export async function getObjectStream(
+  key: string,
+): Promise<{ body: Readable; contentType?: string; contentLength?: number } | null> {
+  if (!isStorageConfigured() || !key) return null;
+  try {
+    const out = await getClient().send(
+      new GetObjectCommand({ Bucket: bucketForKey(key), Key: key }),
+    );
+    if (!out.Body) return null;
+    return {
+      body: out.Body as Readable,
+      contentType: out.ContentType,
+      contentLength: out.ContentLength,
+    };
+  } catch (err) {
+    logger.warn(`[storage] getObjectStream(${key}) failed:`, err);
+    return null;
+  }
 }
 
 const EXT_BY_FOLDER: Record<string, string> = {
@@ -229,14 +258,13 @@ export async function deleteObjectByUrlOrKey(urlOrKey: string): Promise<void> {
     if (!isStorageConfigured() || !urlOrKey) return;
     let key = urlOrKey.startsWith('s3:') ? urlOrKey.slice(3) : urlOrKey;
     if (key.startsWith('http')) {
-      // Strip a known public base URL (image or voice) to recover the object key.
-      const candidates = [env.S3_IMAGE_PUBLIC_BASE_URL, env.S3_PUBLIC_BASE_URL]
-        .filter(Boolean)
-        .map((b) => (b as string).replace(/\/$/, ''));
-      const matched = candidates.find((b) => key.startsWith(b));
-      key = matched
-        ? key.slice(matched.length + 1)
-        : new URL(key).pathname.replace(/^\//, '').replace(new RegExp(`^${env.S3_IMAGE_BUCKET || env.S3_BUCKET}/`), '').replace(new RegExp(`^${env.S3_BUCKET}/`), '');
+      // Proxy image URLs look like  <APP_URL>/img/image/<couple>/<file>.jpg
+      const path = new URL(key).pathname.replace(/^\//, '');
+      key = path.startsWith('img/') ? path.slice(4) : path;
+      // Fall back: strip a configured public base or leading bucket segment.
+      const base = env.S3_PUBLIC_BASE_URL?.replace(/\/$/, '');
+      if (base && urlOrKey.startsWith(base)) key = urlOrKey.slice(base.length + 1);
+      key = key.replace(new RegExp(`^${env.S3_BUCKET}/`), '');
     }
     if (!key) return;
     await getClient().send(

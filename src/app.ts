@@ -235,6 +235,40 @@ export const createApp = (): Application => {
     });
   });
 
+  // ─── Image Proxy ─────────────────────────────────────────────────────────────
+  // Public, unauthenticated (image loaders can't send auth headers). Streams an
+  // object from the PRIVATE bucket so profile photos / community covers can be
+  // served by stable URLs without a public bucket. Keys are unguessable UUIDs
+  // and restricted to the image/ prefix (voice notes can never be proxied).
+  // Objects are immutable (unique key per upload) → cache aggressively.
+  app.get('/img/*', async (req: Request, res: Response) => {
+    const key = (req.params as any)[0] as string;
+    if (!key || !/^image\//.test(key) || key.includes('..')) {
+      res.status(400).json({ success: false, error: 'Invalid image key' });
+      return;
+    }
+    try {
+      const { getObjectStream } = await import('./lib/storage');
+      const obj = await getObjectStream(key);
+      if (!obj) {
+        res.status(404).json({ success: false, error: 'Image not found' });
+        return;
+      }
+      res.setHeader('Content-Type', obj.contentType || 'image/jpeg');
+      if (obj.contentLength) res.setHeader('Content-Length', String(obj.contentLength));
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      // Allow the image to be embedded cross-origin (web admin, share pages).
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      obj.body.on('error', () => {
+        if (!res.headersSent) res.status(502).end();
+        else res.destroy();
+      });
+      obj.body.pipe(res);
+    } catch {
+      res.status(500).json({ success: false, error: 'Image fetch failed' });
+    }
+  });
+
   // ─── App Links / Universal Links Association Files ──────────────────────────
   // Android App Links: proves this domain is owned by the app, so verified
   // https://<host>/share/* links open the app directly (no browser bounce).
