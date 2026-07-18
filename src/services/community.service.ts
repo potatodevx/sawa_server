@@ -22,7 +22,10 @@ export class CommunityService {
     if (cached && Date.now() < cached.expiresAt) {
       return cached.data;
     }
-    const me = await prisma.couple.findUnique({ where: { coupleId: requestingCoupleId } });
+    const me = await prisma.couple.findUnique({
+      where: { coupleId: requestingCoupleId },
+      select: { coupleId: true, blocked: true },
+    });
     if (!me) throw new AppError('Profile not found', 404);
 
     const SUPPORTED_CITIES = ['Bangalore', 'Chennai', 'New Delhi', 'Delhi', 'Mumbai', 'Gurgaon', 'Noida', 'Hyderabad', 'Goa'];
@@ -114,7 +117,10 @@ export class CommunityService {
   }
 
   async getMyCommunities(requestingCoupleId: string) {
-    const me = await prisma.couple.findUnique({ where: { coupleId: requestingCoupleId } });
+    const me = await prisma.couple.findUnique({
+      where: { coupleId: requestingCoupleId },
+      select: { coupleId: true, blocked: true },
+    });
     if (!me) throw new AppError('Profile not found', 404);
 
     const memberships = await prisma.communityMember.findMany({
@@ -156,7 +162,10 @@ export class CommunityService {
   }
 
   async createCommunity(requestingCoupleId: string, data: any) {
-    const me = await prisma.couple.findUnique({ where: { coupleId: requestingCoupleId } });
+    const me = await prisma.couple.findUnique({
+      where: { coupleId: requestingCoupleId },
+      select: { coupleId: true, profileName: true, primaryPhoto: true },
+    });
     if (!me) throw new AppError('Profile not found', 404);
 
     const community = await prisma.community.create({
@@ -231,7 +240,10 @@ export class CommunityService {
 
   
   async joinCommunity(requestingCoupleId: string, communityId: string) {
-    const me = await prisma.couple.findUnique({ where: { coupleId: requestingCoupleId } });
+    const me = await prisma.couple.findUnique({
+      where: { coupleId: requestingCoupleId },
+      select: { coupleId: true, profileName: true, primaryPhoto: true },
+    });
     if (!me) throw new AppError('Profile not found', 404);
 
     const isMember = await prisma.communityMember.findUnique({
@@ -301,7 +313,10 @@ export class CommunityService {
   }
 
   async leaveCommunity(requestingCoupleId: string, communityId: string) {
-    const me = await prisma.couple.findUnique({ where: { coupleId: requestingCoupleId } });
+    const me = await prisma.couple.findUnique({
+      where: { coupleId: requestingCoupleId },
+      select: { coupleId: true },
+    });
     if (!me) throw new AppError('Profile not found', 404);
 
     await prisma.communityMember.deleteMany({ where: { communityId, coupleId: me.coupleId } });
@@ -317,8 +332,10 @@ export class CommunityService {
       }
     });
 
-    const remainingAdmins = await prisma.communityAdmin.findMany({ where: { communityId } });
-    const remainingMembers = await prisma.communityMember.findMany({ where: { communityId } });
+    const [remainingAdmins, remainingMembers] = await Promise.all([
+      prisma.communityAdmin.findMany({ where: { communityId }, select: { coupleId: true } }),
+      prisma.communityMember.findMany({ where: { communityId }, select: { coupleId: true } }),
+    ]);
 
     if (remainingAdmins.length === 0 && remainingMembers.length > 0) {
       await prisma.communityAdmin.create({ data: { communityId, coupleId: remainingMembers[0].coupleId } });
@@ -341,7 +358,10 @@ export class CommunityService {
   }
 
   async processJoinRequest(requestingCoupleId: string, communityId: string, requestId: string, decision: 'accept' | 'reject') {
-    const me = await prisma.couple.findUnique({ where: { coupleId: requestingCoupleId } });
+    const me = await prisma.couple.findUnique({
+      where: { coupleId: requestingCoupleId },
+      select: { coupleId: true },
+    });
     if (!me) throw new AppError('Profile not found', 404);
 
     const isAdmin = await prisma.communityAdmin.findUnique({
@@ -400,16 +420,30 @@ export class CommunityService {
   }
 
   async getCommunityDetail(requestingCoupleId: string, communityId: string) {
-    const me = await prisma.couple.findUnique({ where: { coupleId: requestingCoupleId } });
+    const me = await prisma.couple.findUnique({
+      where: { coupleId: requestingCoupleId },
+      select: { coupleId: true },
+    });
     if (!me) throw new AppError('Profile not found', 404);
+
+    const COUPLE_DETAIL_SELECT = {
+      id: true, coupleId: true, profileName: true, primaryPhoto: true, locationCity: true,
+    } as const;
 
     const c = await prisma.community.findUnique({
       where: { id: communityId },
-      include: {
-        members: { include: { couple: true } },
-        admins: { include: { couple: { include: { partner1: true, partner2: true } } } },
-        joinRequests: { include: { couple: true } }
-      }
+      select: {
+        id: true, name: true, description: true, city: true, coverImageUrl: true,
+        members: {
+          select: { coupleId: true, couple: { select: COUPLE_DETAIL_SELECT } },
+        },
+        admins: {
+          select: { coupleId: true, couple: { select: COUPLE_DETAIL_SELECT } },
+        },
+        joinRequests: {
+          select: { coupleId: true, couple: { select: COUPLE_DETAIL_SELECT } },
+        },
+      },
     });
 
     if (!c) throw new AppError('Not found', 404);
@@ -501,7 +535,10 @@ export class CommunityService {
     communityId: string,
     data: { name?: string; description?: string; coverImageUrl?: string; coverImageBase64?: string },
   ) {
-    const me = await prisma.couple.findUnique({ where: { coupleId: requestingCoupleId } });
+    const me = await prisma.couple.findUnique({
+      where: { coupleId: requestingCoupleId },
+      select: { coupleId: true },
+    });
     if (!me) throw new AppError('Profile not found', 404);
 
     const isAdmin = await prisma.communityAdmin.findUnique({
@@ -528,7 +565,10 @@ export class CommunityService {
   }
 
   async deleteCommunity(requestingCoupleId: string, communityId: string) {
-    const me = await prisma.couple.findUnique({ where: { coupleId: requestingCoupleId } });
+    const me = await prisma.couple.findUnique({
+      where: { coupleId: requestingCoupleId },
+      select: { coupleId: true },
+    });
     if (!me) throw new AppError('Profile not found', 404);
 
     const isAdmin = await prisma.communityAdmin.findUnique({
@@ -549,15 +589,27 @@ export class CommunityService {
   }
 
   async getInviteableCouples(requestingCoupleId: string, communityId: string) {
-    const me = await prisma.couple.findUnique({ where: { coupleId: requestingCoupleId } });
+    const me = await prisma.couple.findUnique({
+      where: { coupleId: requestingCoupleId },
+      select: { coupleId: true },
+    });
     if (!me) throw new AppError('Profile not found', 404);
 
-    const matches = await prisma.match.findMany({
-      where: { OR: [{ couple1Id: me.coupleId }, { couple2Id: me.coupleId }], status: 'accepted' },
-      include: { couple1: true, couple2: true }
-    });
+    const INVITE_COUPLE_SELECT = {
+      id: true, coupleId: true, profileName: true, primaryPhoto: true, locationCity: true,
+    } as const;
 
-    const members = await prisma.communityMember.findMany({ where: { communityId } });
+    const [matches, members] = await Promise.all([
+      prisma.match.findMany({
+        where: { OR: [{ couple1Id: me.coupleId }, { couple2Id: me.coupleId }], status: 'accepted' },
+        select: {
+          id: true, couple1Id: true, couple2Id: true,
+          couple1: { select: INVITE_COUPLE_SELECT },
+          couple2: { select: INVITE_COUPLE_SELECT },
+        },
+      }),
+      prisma.communityMember.findMany({ where: { communityId }, select: { coupleId: true } }),
+    ]);
     const memberIds = members.map(m => m.coupleId);
 
     const matchedCoupleIds = matches
@@ -604,7 +656,10 @@ export class CommunityService {
   }
 
   async inviteToCommunity(requestingCoupleId: string, communityId: string, invitedCoupleIds: string[]) {
-    const me = await prisma.couple.findUnique({ where: { coupleId: requestingCoupleId } });
+    const me = await prisma.couple.findUnique({
+      where: { coupleId: requestingCoupleId },
+      select: { coupleId: true, profileName: true },
+    });
     if (!me) throw new AppError('Profile not found', 404);
 
     const community = await prisma.community.findUnique({ where: { id: communityId } });

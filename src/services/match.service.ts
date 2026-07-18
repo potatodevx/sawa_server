@@ -19,11 +19,15 @@ export class MatchService {
    * Fetches the discovery feed of couples
    */
   async getDiscoveryFeed(requestingCoupleId: string, cityFilter?: string, coupleMongoId?: string) {
+    const meSelect = {
+      id: true, coupleId: true, partner1Id: true, partner2Id: true,
+      blocked: true, locationCity: true, locationLatitude: true, locationLongitude: true,
+    } as const;
     let me;
     if (coupleMongoId) {
-      me = await prisma.couple.findUnique({ where: { id: coupleMongoId } });
+      me = await prisma.couple.findUnique({ where: { id: coupleMongoId }, select: meSelect });
     } else {
-      me = await prisma.couple.findUnique({ where: { coupleId: requestingCoupleId } });
+      me = await prisma.couple.findUnique({ where: { coupleId: requestingCoupleId }, select: meSelect });
     }
     
     if (!me) throw new AppError('Couple profile not found', 404);
@@ -137,17 +141,25 @@ export class MatchService {
    * Say hello (like) to a couple
    */
   async sayHello(requestingCoupleId: string, targetCoupleIdStr: string, coupleMongoId?: string) {
+    const sayHelloSelect = {
+      id: true, coupleId: true, profileName: true, primaryPhoto: true,
+      locationCity: true, bio: true, activities: true, socialVibes: true, matchCriteria: true,
+    } as const;
     let me;
     if (coupleMongoId) {
-      me = await prisma.couple.findUnique({ where: { id: coupleMongoId } });
+      me = await prisma.couple.findUnique({ where: { id: coupleMongoId }, select: sayHelloSelect });
     } else {
-      me = await prisma.couple.findUnique({ where: { coupleId: requestingCoupleId } });
+      me = await prisma.couple.findUnique({ where: { coupleId: requestingCoupleId }, select: sayHelloSelect });
     }
     
     if (!me) throw new AppError('Profile not found', 404);
 
     let targetCouple = await prisma.couple.findFirst({
-        where: { OR: [{ id: targetCoupleIdStr }, { coupleId: targetCoupleIdStr }] }
+      where: { OR: [{ id: targetCoupleIdStr }, { coupleId: targetCoupleIdStr }] },
+      select: {
+        id: true, coupleId: true, profileName: true, primaryPhoto: true,
+        locationCity: true, bio: true, activities: true, socialVibes: true, matchCriteria: true,
+      },
     });
 
     if (!targetCouple) {
@@ -373,6 +385,10 @@ export class MatchService {
       meGeo = me;
     }
 
+    const COUPLE_CARD_SELECT = {
+      id: true, coupleId: true, profileName: true, primaryPhoto: true, locationCity: true,
+      locationLatitude: true, locationLongitude: true,
+    } as const;
     // Incoming requests: pending matches where the OTHER person initiated (actionById ≠ meId)
     const pending = await prisma.match.findMany({ 
       where: {
@@ -380,7 +396,11 @@ export class MatchService {
         actionById: { not: meId },
         OR: [{ couple1Id: meId }, { couple2Id: meId }],
       },
-      include: { couple1: true, couple2: true }
+      select: {
+        id: true, couple1Id: true, couple2Id: true, createdAt: true,
+        couple1: { select: COUPLE_CARD_SELECT },
+        couple2: { select: COUPLE_CARD_SELECT },
+      },
     });
 
     return pending.map((m: any) => {

@@ -92,6 +92,8 @@ model OnboardingAnswer {
   selectedOptionIds String[]
   couple            Couple   @relation(fields: [coupleId], references: [coupleId])
 
+  @@index([coupleId])
+  @@index([coupleId, questionId])
   @@map("onboarding_answers")
 }
 
@@ -262,6 +264,9 @@ model Report {
   updatedAt  DateTime     @updatedAt
   reporter   Couple       @relation("Report_reporter", fields: [reporterId], references: [coupleId])
 
+  @@index([reporterId])
+  @@index([targetId])
+  @@index([status])
   @@map("reports")
 }
 
