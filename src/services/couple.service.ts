@@ -2,6 +2,7 @@ import { prisma } from '../lib/prisma';
 import { AppError } from '../utils/AppError';
 import { logger } from '../utils/logger';
 import { emitRealtimeNotification } from '../utils/realtime';
+import { materializeImage, materializeImages } from '../lib/storage';
 
 export class CoupleService {
   /**
@@ -160,14 +161,20 @@ export class CoupleService {
     const updateData: any = {};
     
     if (data.primaryPhotoBase64 && data.primaryPhotoBase64.length > 10) {
-      const prefix = data.primaryPhotoBase64.startsWith('data:') ? '' : 'data:image/jpeg;base64,';
-      updateData.primaryPhoto = prefix + data.primaryPhotoBase64;
+      const dataUri = data.primaryPhotoBase64.startsWith('data:')
+        ? data.primaryPhotoBase64
+        : 'data:image/jpeg;base64,' + data.primaryPhotoBase64;
+      // Store an S3 URL (falls back to base64 if storage is unavailable).
+      updateData.primaryPhoto = await materializeImage(dataUri, coupleId);
     }
 
     const existingToKeep = data.keepSecondaryPhotoUrls || [];
-    const newPhotos = (data.secondaryPhotosBase64 || [])
-      .filter(b64 => b64 && b64.length > 10)
-      .map(b64 => (b64.startsWith('data:') ? b64 : 'data:image/jpeg;base64,' + b64));
+    const newPhotos = await materializeImages(
+      (data.secondaryPhotosBase64 || [])
+        .filter(b64 => b64 && b64.length > 10)
+        .map(b64 => (b64.startsWith('data:') ? b64 : 'data:image/jpeg;base64,' + b64)),
+      coupleId,
+    );
 
     if (data.keepSecondaryPhotoUrls !== undefined || data.secondaryPhotosBase64 !== undefined) {
       updateData.secondaryPhotos = [...existingToKeep, ...newPhotos].slice(0, 3);
@@ -317,18 +324,23 @@ export class CoupleService {
       }
     }
 
-    // 1. Photos processing
+    // 1. Photos processing — convert incoming base64 to S3 URLs (keeps ~0.5 MB
+    // blobs out of Postgres). Falls back to base64 if storage is unavailable.
     if (data.primaryPhotoBase64 && data.primaryPhotoBase64.length > 10) {
-      updateData.primaryPhoto = data.primaryPhotoBase64.startsWith('data:') 
-        ? data.primaryPhotoBase64 
+      const dataUri = data.primaryPhotoBase64.startsWith('data:')
+        ? data.primaryPhotoBase64
         : 'data:image/jpeg;base64,' + data.primaryPhotoBase64;
+      updateData.primaryPhoto = await materializeImage(dataUri, coupleId);
     }
 
     if (data.secondaryPhotosBase64 !== undefined || data.keepSecondaryPhotoUrls !== undefined) {
       const existingToKeep = data.keepSecondaryPhotoUrls || [];
-      const newPhotos = (data.secondaryPhotosBase64 || [])
-        .filter(b64 => b64 && b64.length > 10)
-        .map(b64 => b64.startsWith('data:') ? b64 : 'data:image/jpeg;base64,' + b64);
+      const newPhotos = await materializeImages(
+        (data.secondaryPhotosBase64 || [])
+          .filter(b64 => b64 && b64.length > 10)
+          .map(b64 => b64.startsWith('data:') ? b64 : 'data:image/jpeg;base64,' + b64),
+        coupleId,
+      );
       updateData.secondaryPhotos = [...existingToKeep, ...newPhotos].slice(0, 3);
     }
 

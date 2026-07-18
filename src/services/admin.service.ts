@@ -2,6 +2,7 @@ import { prisma } from '../lib/prisma';
 import { invalidateBanCache } from '../middleware/authenticate';
 import { emitRealtimeNotification } from '../utils/realtime';
 import { logger } from '../utils/logger';
+import { materializeImageLoose } from '../lib/storage';
 
 /**
  * Inactivity threshold (days). A user with no `lastActiveAt` ping in this
@@ -611,7 +612,10 @@ export class AdminService {
         description: data.description,
         city: data.city,
         tags: data.tags || [],
-        coverImageUrl: data.coverImageUrl,
+        coverImageUrl: (await materializeImageLoose(
+          data.coverImageUrl ?? (data as any).coverImageBase64,
+          data.hostCoupleId ?? undefined,
+        )) ?? undefined,
         ...(hostExists && data.hostCoupleId
           ? {
               admins: { create: { coupleId: data.hostCoupleId } },

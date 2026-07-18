@@ -4,6 +4,15 @@ import { logger } from '../utils/logger';
 import { emitRealtimeNotification } from '../utils/realtime';
 import { upsertGroupedNotification } from './notification.service';
 import { cacheGet, cacheSet, cacheInvalidatePattern } from '../lib/cache';
+import { materializeImageLoose } from '../lib/storage';
+
+/** Normalize a cover image field (base64/data-uri/url) to a stored S3 URL. */
+async function materializeCover(
+  value: string | undefined | null,
+  coupleId?: string,
+): Promise<string | undefined> {
+  return (await materializeImageLoose(value, coupleId)) ?? undefined;
+}
 
 // Shared TTL cache for getAllCommunities — avoids repeated heavy queries for
 // the same user within 30 seconds. Backed by Redis so hits AND invalidations
@@ -177,7 +186,7 @@ export class CommunityService {
         name: data.name,
         description: data.description,
         city: data.city,
-        coverImageUrl: data.coverImageUrl,
+        coverImageUrl: await materializeCover(data.coverImageUrl, me.coupleId),
         tags: data.tags || [],
         admins: { create: { coupleId: me.coupleId } },
         members: { create: { coupleId: me.coupleId } }
@@ -554,10 +563,9 @@ export class CommunityService {
     if (data.name?.trim()) updateData.name = data.name.trim();
     if (data.description !== undefined) updateData.description = data.description;
     if (data.coverImageBase64 && data.coverImageBase64.length > 10) {
-      const prefix = data.coverImageBase64.startsWith('data:') ? '' : 'data:image/jpeg;base64,';
-      updateData.coverImageUrl = prefix + data.coverImageBase64;
+      updateData.coverImageUrl = await materializeCover(data.coverImageBase64, me.coupleId);
     } else if (data.coverImageUrl !== undefined) {
-      updateData.coverImageUrl = data.coverImageUrl;
+      updateData.coverImageUrl = await materializeCover(data.coverImageUrl, me.coupleId);
     }
 
     const community = await prisma.community.update({

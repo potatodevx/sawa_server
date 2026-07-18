@@ -26,6 +26,12 @@ const envSchema = z.object({
   S3_ACCESS_KEY_ID: z.string().optional(),
   S3_SECRET_ACCESS_KEY: z.string().optional(),
   S3_PUBLIC_BASE_URL: z.string().optional(),
+  // Dedicated PUBLIC bucket for images (profile photos, community covers).
+  // Kept separate from the private voice bucket so images can be served via
+  // stable public URLs without exposing private chat audio. Falls back to
+  // S3_BUCKET when unset (dev), but production should set a public bucket.
+  S3_IMAGE_BUCKET: z.string().optional(),
+  S3_IMAGE_PUBLIC_BASE_URL: z.string().optional(),
   RENDER_EXTERNAL_URL: z.string().optional(),
   APP_URL: z.string().optional(),
   RAILWAY_PUBLIC_DOMAIN: z.string().optional(),

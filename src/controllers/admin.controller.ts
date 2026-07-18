@@ -4,6 +4,7 @@ import { prisma } from '../lib/prisma';
 import { AdminService } from '../services/admin.service';
 import { signAccessToken, verifyAccessToken } from '../utils/jwt';
 import { logger } from '../utils/logger';
+import { materializeImageLoose } from '../lib/storage';
 
 const adminService = new AdminService();
 
@@ -164,10 +165,9 @@ export class AdminController {
       if (city?.trim()) updateData.city = city.trim();
       if (tags !== undefined) updateData.tags = Array.isArray(tags) ? tags : tags.split(',').map((t: string) => t.trim()).filter(Boolean);
       if (coverImageBase64 && coverImageBase64.length > 10) {
-        const prefix = coverImageBase64.startsWith('data:') ? '' : 'data:image/jpeg;base64,';
-        updateData.coverImageUrl = prefix + coverImageBase64;
+        updateData.coverImageUrl = await materializeImageLoose(coverImageBase64);
       } else if (coverImageUrl !== undefined) {
-        updateData.coverImageUrl = coverImageUrl;
+        updateData.coverImageUrl = await materializeImageLoose(coverImageUrl);
       }
       const c = await prisma.community.update({ where: { id }, data: updateData });
       res.status(200).json({ success: true, data: c });
