@@ -78,6 +78,18 @@ export const markAsRead = async (req: Request, res: Response): Promise<void> => 
   sendSuccess({ res, statusCode: 200, message: 'Notification marked as read' });
 };
 
+export const markAllAsRead = async (req: Request, res: Response): Promise<void> => {
+  const { coupleId } = req.user!;
+  if (!coupleId) throw new AppError('Couple ID required', 400);
+  await prisma.notification.updateMany({
+    where: { recipientId: coupleId, read: false },
+    data: { read: true },
+  });
+  // Immediately bust the cached unread count so the next poll returns 0.
+  await invalidateNotifUnreadCount(coupleId);
+  sendSuccess({ res, statusCode: 200, message: 'All notifications marked as read' });
+};
+
 export const getUnreadCount = async (req: Request, res: Response): Promise<void> => {
   const { coupleId } = req.user!;
   if (!coupleId) throw new AppError('Couple ID required', 400);
