@@ -181,12 +181,18 @@ export class CommunityService {
     });
     if (!me) throw new AppError('Profile not found', 404);
 
+    // Check for duplicate name up-front to give a clear error instead of a 500
+    const existing = await prisma.community.findUnique({ where: { name: data.name }, select: { id: true } });
+    if (existing) throw new AppError('A group with this name already exists. Please choose a different name.', 409);
+
+    const coverImageUrl = await materializeCover(data.coverImageUrl, me.coupleId);
+
     const community = await prisma.community.create({
       data: {
         name: data.name,
         description: data.description,
         city: data.city,
-        coverImageUrl: await materializeCover(data.coverImageUrl, me.coupleId),
+        coverImageUrl,
         tags: data.tags || [],
         admins: { create: { coupleId: me.coupleId } },
         members: { create: { coupleId: me.coupleId } }
