@@ -1,0 +1,35 @@
+export declare const env: {
+    NODE_ENV: "development" | "production" | "test";
+    PORT: number;
+    DATABASE_URL: string;
+    JWT_ACCESS_SECRET: string;
+    JWT_REFRESH_SECRET: string;
+    JWT_ACCESS_EXPIRES_IN: string;
+    JWT_REFRESH_EXPIRES_IN: string;
+    CORS_ORIGINS: string;
+    RATE_LIMIT_WINDOW_MS: number;
+    RATE_LIMIT_MAX: number;
+    S3_REGION: string;
+    GROQ_API_KEY: string;
+    ADMIN_EMAIL: string;
+    ADMIN_PASSWORD: string;
+    REDIS_URL?: string | undefined;
+    CLOUDINARY_CLOUD_NAME?: string | undefined;
+    CLOUDINARY_API_KEY?: string | undefined;
+    CLOUDINARY_API_SECRET?: string | undefined;
+    S3_ENDPOINT?: string | undefined;
+    S3_BUCKET?: string | undefined;
+    S3_ACCESS_KEY_ID?: string | undefined;
+    S3_SECRET_ACCESS_KEY?: string | undefined;
+    S3_PUBLIC_BASE_URL?: string | undefined;
+    S3_IMAGE_BUCKET?: string | undefined;
+    S3_IMAGE_PUBLIC_BASE_URL?: string | undefined;
+    RENDER_EXTERNAL_URL?: string | undefined;
+    APP_URL?: string | undefined;
+    RAILWAY_PUBLIC_DOMAIN?: string | undefined;
+    BYPASS_PHONES?: string | undefined;
+    TWILIO_ACCOUNT_SID?: string | undefined;
+    TWILIO_AUTH_TOKEN?: string | undefined;
+    TWILIO_PHONE_NUMBER?: string | undefined;
+};
+//# sourceMappingURL=env.d.ts.map

@@ -2,7 +2,7 @@
 node_modules/
 
 # Build output
-dist/
+# dist/ — committed so Railway can serve without a build step
 
 # Environment variables — NEVER commit these
 .env
